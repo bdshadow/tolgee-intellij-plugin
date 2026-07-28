@@ -1,0 +1,86 @@
+<idea-plugin>
+    <id>io.tolgee.intellij</id>
+    <name>Tolgee</name>
+    <vendor email="info@tolgee.io" url="https://tolgee.io">Tolgee</vendor>
+
+    <description><![CDATA[
+        Tolgee localization platform integration for JetBrains IDEs.
+        <ul>
+            <li>Configure Tolgee instance URL and API key globally</li>
+            <li>Link the current project to a Tolgee project</li>
+            <li>Push and pull translations from Tolgee</li>
+            <li>Autocomplete translation keys with ICU parameters in JS/TS/JSX/TSX, Java, and Kotlin</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends optional="true" config-file="tolgee-javascript.xml">JavaScript</depends>
+    <depends optional="true" config-file="tolgee-java.xml">com.intellij.java</depends>
+    <depends optional="true" config-file="tolgee-kotlin.xml">org.jetbrains.kotlin</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Application-level Tolgee connection settings (URL + API key) -->
+        <applicationService
+                serviceImplementation="io.tolgee.intellij.settings.TolgeeAppSettings"/>
+
+        <!-- Project-level link to a Tolgee project + cached key index -->
+        <projectService
+                serviceImplementation="io.tolgee.intellij.project.TolgeeProjectLink"/>
+
+        <projectService
+                serviceImplementation="io.tolgee.intellij.project.TolgeeKeyCache"/>
+
+        <!-- Tool Window -->
+        <toolWindow
+                id="Tolgee"
+                anchor="right"
+                icon="io.tolgee.intellij.util.TolgeeIcons.TOOL_WINDOW"
+                factoryClass="io.tolgee.intellij.toolwindow.TolgeeToolWindowFactory"/>
+
+        <notificationGroup id="Tolgee" displayType="BALLOON"/>
+
+        <!-- Android-style strings.xml completion. XML PSI is part of the platform,
+             so no optional depends is needed. -->
+        <completion.contributor
+                language="XML"
+                implementationClass="io.tolgee.intellij.completion.XmlTolgeeKeyCompletionContributor"/>
+    </extensions>
+
+    <actions>
+        <action id="Tolgee.AddProject"
+                class="io.tolgee.intellij.toolwindow.AddProjectAction"
+                icon="AllIcons.General.Add"
+                text="Add Tolgee Project"
+                description="Configure a Tolgee instance and link a project">
+        </action>
+        <action id="Tolgee.Push"
+                class="io.tolgee.intellij.push.PushAction"
+                icon="AllIcons.Actions.Upload"
+                text="Push to Tolgee"
+                description="Upload local translation files to Tolgee">
+        </action>
+        <action id="Tolgee.Pull"
+                class="io.tolgee.intellij.pull.PullAction"
+                icon="AllIcons.Actions.Download"
+                text="Pull from Tolgee"
+                description="Download translations from Tolgee">
+        </action>
+        <action id="Tolgee.RefreshKeys"
+                class="io.tolgee.intellij.completion.RefreshKeyCacheAction"
+                icon="AllIcons.Actions.Refresh"
+                text="Refresh Tolgee Keys"
+                description="Refresh the local cache of Tolgee keys">
+        </action>
+        <action id="Tolgee.Unlink"
+                class="io.tolgee.intellij.toolwindow.UnlinkProjectAction"
+                icon="AllIcons.General.Remove"
+                text="Unlink Tolgee Project"
+                description="Remove the link to the Tolgee project">
+        </action>
+        <action id="Tolgee.EditProject"
+                class="io.tolgee.intellij.toolwindow.EditProjectAction"
+                text="Edit Connection…"
+                description="Edit the Tolgee project connection">
+        </action>
+    </actions>
+</idea-plugin>

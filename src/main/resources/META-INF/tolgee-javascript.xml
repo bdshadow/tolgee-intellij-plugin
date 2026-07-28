@@ -1,0 +1,16 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <completion.contributor
+                language="JavaScript"
+                implementationClass="io.tolgee.intellij.completion.JsTolgeeKeyCompletionContributor"/>
+        <completion.contributor
+                language="TypeScript"
+                implementationClass="io.tolgee.intellij.completion.JsTolgeeKeyCompletionContributor"/>
+        <completion.contributor
+                language="JSX Harmony"
+                implementationClass="io.tolgee.intellij.completion.JsTolgeeKeyCompletionContributor"/>
+        <completion.contributor
+                language="TypeScript JSX"
+                implementationClass="io.tolgee.intellij.completion.JsTolgeeKeyCompletionContributor"/>
+    </extensions>
+</idea-plugin>

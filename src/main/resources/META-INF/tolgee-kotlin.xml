@@ -1,0 +1,7 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <completion.contributor
+                language="kotlin"
+                implementationClass="io.tolgee.intellij.completion.KotlinTolgeeKeyCompletionContributor"/>
+    </extensions>
+</idea-plugin>
