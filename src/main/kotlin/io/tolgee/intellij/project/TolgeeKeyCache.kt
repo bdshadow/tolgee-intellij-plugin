@@ -11,6 +11,7 @@ import io.tolgee.intellij.api.TolgeeKey
 import io.tolgee.intellij.api.TolgeeTranslation
 import io.tolgee.intellij.util.TranslationFiles
 import kotlinx.serialization.json.JsonPrimitive
+import org.jetbrains.annotations.TestOnly
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -25,6 +26,11 @@ class TolgeeKeyCache(private val project: Project) {
     private val ref = AtomicReference(Index())
 
     val current: Index get() = ref.get()
+
+    @TestOnly
+    fun setIndexForTests(index: Index) {
+        ref.set(index)
+    }
 
     fun refreshAsync(onDone: ((Result<Int>) -> Unit)? = null) {
         val link = TolgeeProjectLink.getInstance(project)

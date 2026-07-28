@@ -47,6 +47,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.opentest4j:opentest4j:1.3.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
 // Extra run task: `./gradlew runIdeAndroidStudio` launches the plugin sandbox
