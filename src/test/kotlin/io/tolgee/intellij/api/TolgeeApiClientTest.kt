@@ -100,6 +100,51 @@ class TolgeeApiClientTest {
     }
 
     @Test
+    fun `listProjectLanguages walks pages and decodes tags`() {
+        server.enqueue(
+            jsonResponse(
+                """{"_embedded":{"languages":[
+                       {"id":1,"tag":"en","name":"English","base":true},
+                       {"id":2,"tag":"de","name":"German"}
+                    ]},
+                    "page":{"size":2,"number":0,"totalElements":3,"totalPages":2}}""",
+            ),
+        )
+        server.enqueue(
+            jsonResponse(
+                """{"_embedded":{"languages":[{"id":3,"tag":"fr","name":"French"}]},
+                    "page":{"size":2,"number":1,"totalElements":3,"totalPages":2}}""",
+            ),
+        )
+        val langs = client.listProjectLanguages(5)
+        assertEquals(listOf("en", "de", "fr"), langs.map { it.tag })
+        assertTrue(server.takeRequest().path!!.startsWith("/v2/projects/5/languages"))
+    }
+
+    @Test
+    fun `listProjectNamespaces filters blank names and returns only names`() {
+        server.enqueue(
+            jsonResponse(
+                """{"_embedded":{"namespaces":[
+                       {"id":null,"name":""},
+                       {"id":1,"name":"emails"},
+                       {"id":2,"name":"invoices"}
+                    ]},
+                    "page":{"size":100,"number":0,"totalElements":3,"totalPages":1}}""",
+            ),
+        )
+        val ns = client.listProjectNamespaces(9)
+        assertEquals(listOf("emails", "invoices"), ns)
+        assertTrue(server.takeRequest().path!!.startsWith("/v2/projects/9/used-namespaces"))
+    }
+
+    @Test
+    fun `listProjectNamespaces tolerates empty embedded`() {
+        server.enqueue(jsonResponse("""{"page":{"size":100,"number":0,"totalElements":0,"totalPages":0}}"""))
+        assertEquals(emptyList<String>(), client.listProjectNamespaces(1))
+    }
+
+    @Test
     fun `importFlatJson posts multipart with expected fields`() {
         server.enqueue(MockResponse().setResponseCode(200))
         client.importFlatJson(

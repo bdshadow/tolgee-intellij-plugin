@@ -95,6 +95,39 @@ class TolgeeApiClient(
     fun getProject(projectId: Long): TolgeeProject =
         get("/v2/projects/$projectId")
 
+    fun listProjectLanguages(projectId: Long): List<TolgeeLanguage> {
+        val collected = mutableListOf<TolgeeLanguage>()
+        var page = 0
+        while (true) {
+            val resp = get<PagedLanguages>(
+                "/v2/projects/$projectId/languages",
+                mapOf("page" to page.toString(), "size" to "100"),
+            )
+            collected += resp.embedded?.languages.orEmpty()
+            val info = resp.page ?: break
+            if (page + 1 >= info.totalPages) break
+            page++
+        }
+        return collected
+    }
+
+    /** Only namespaces that are actually referenced by keys; the default (unnamed) namespace is filtered out. */
+    fun listProjectNamespaces(projectId: Long): List<String> {
+        val collected = mutableListOf<String>()
+        var page = 0
+        while (true) {
+            val resp = get<PagedNamespaces>(
+                "/v2/projects/$projectId/used-namespaces",
+                mapOf("page" to page.toString(), "size" to "100"),
+            )
+            collected += resp.embedded?.namespaces.orEmpty().mapNotNull { it.name?.takeIf { n -> n.isNotBlank() } }
+            val info = resp.page ?: break
+            if (page + 1 >= info.totalPages) break
+            page++
+        }
+        return collected
+    }
+
     /** Paged fetch of every key with all translations. Used by Pull. */
     fun listAllKeys(projectId: Long, languages: List<String> = emptyList()): List<TolgeeKey> {
         val collected = mutableListOf<TolgeeKey>()

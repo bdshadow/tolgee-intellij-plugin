@@ -8,11 +8,15 @@ import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.ui.CheckBoxList
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBPasswordField
+import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.CollapsibleRow
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.util.ui.JBDimension
 import io.tolgee.intellij.api.TolgeeApiClient
 import io.tolgee.intellij.api.TolgeeProject
 import io.tolgee.intellij.project.TolgeeKeyCache
@@ -20,7 +24,7 @@ import io.tolgee.intellij.project.TolgeeProjectLink
 import io.tolgee.intellij.pull.PullAction
 import io.tolgee.intellij.settings.TolgeeAppSettings
 import io.tolgee.intellij.util.TranslationFiles
-import io.tolgee.intellij.util.splitCsv
+import java.awt.event.ItemEvent
 import javax.swing.DefaultComboBoxModel
 import javax.swing.JButton
 import javax.swing.JComponent
@@ -34,19 +38,42 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     private val apiKeyField = JBPasswordField().apply { text = settings.apiKey }
     private val projectCombo = ComboBox<TolgeeProject>().apply { renderer = TolgeeProjectListRenderer() }
     private val refreshProjectsButton = JButton("Load projects")
-    private val namespacesField = JBTextField(link.namespaces.joinToString(","))
     private val pathField = JBTextField(link.translationsPath.ifBlank { ".tolgee" })
-    private val languagesField = JBTextField(link.languages.joinToString(","))
     private val autoPullCheckbox = JBCheckBox("Pull translations after creating the connection", true)
     private val isCreation = !link.isLinked
+
+    private val namespacesList = CheckBoxList<String>().apply {
+        isEnabled = false
+        setStringItems(linkedMapOf(ALL_NAMESPACES to true))
+    }
+    private val languagesList = CheckBoxList<String>().apply {
+        isEnabled = false
+        setStringItems(linkedMapOf(ALL_LANGUAGES to true))
+    }
+
+    // Guards CheckBoxList listeners from re-entering during programmatic updates.
+    private var suppressListListeners = false
+
+    // Drop metadata responses from superseded loads (user clicked between projects).
+    private var metaEpoch = 0
+
+    private lateinit var advancedGroup: CollapsibleRow
 
     init {
         title = if (link.isLinked) "Edit Tolgee Project" else "Add Tolgee Project"
         setOKButtonText(if (link.isLinked) "Save" else "Add")
         refreshProjectsButton.addActionListener { refreshProjects() }
+        projectCombo.addItemListener { e ->
+            if (e.stateChange == ItemEvent.SELECTED) {
+                (e.item as? TolgeeProject)?.let { loadProjectMeta(it.id) }
+            }
+        }
+        installExclusiveAllListener(namespacesList, ALL_NAMESPACES)
+        installExclusiveAllListener(languagesList, ALL_LANGUAGES)
         init()
         if (link.isLinked) {
-            // Show current selection as a stub so OK is enabled without reloading.
+            // Show current selection as a stub so OK is enabled without reloading;
+            // the selection change also kicks off a metadata load.
             val stub = TolgeeProject(id = link.tolgeeProjectId, name = link.tolgeeProjectName)
             val model = DefaultComboBoxModel<TolgeeProject>()
             model.addElement(stub)
@@ -62,18 +89,22 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             cell(projectCombo).resizableColumn().align(AlignX.FILL)
             cell(refreshProjectsButton)
         }
-        row("Namespaces:") {
-            cell(namespacesField).resizableColumn().align(AlignX.FILL)
-                .comment("Comma-separated. Leave blank to include all namespaces.")
-        }
         row("Translations path:") { cell(pathField).resizableColumn().align(AlignX.FILL) }
-        row("Languages:") {
-            cell(languagesField).resizableColumn().align(AlignX.FILL)
-                .comment("Comma-separated. Leave blank to include all project languages.")
-        }
         if (isCreation) {
             row { cell(autoPullCheckbox) }
         }
+        advancedGroup = collapsibleGroup("Advanced") {
+            row("Namespaces:") {
+                cell(JBScrollPane(namespacesList).apply { preferredSize = JBDimension(320, 120) })
+                    .resizableColumn().align(AlignX.FILL)
+            }
+            row("Languages:") {
+                cell(JBScrollPane(languagesList).apply { preferredSize = JBDimension(320, 120) })
+                    .resizableColumn().align(AlignX.FILL)
+            }
+        }
+    }.also {
+        advancedGroup.expanded = link.isLinked
     }
 
     override fun doValidate(): ValidationInfo? {
@@ -91,9 +122,9 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         val selected = projectCombo.selectedItem as? TolgeeProject ?: return
         link.tolgeeProjectId = selected.id
         link.tolgeeProjectName = selected.name
-        link.namespaces = namespacesField.text.splitCsv()
+        link.namespaces = collectSelection(namespacesList, ALL_NAMESPACES).toMutableList()
         link.translationsPath = pathField.text.trim().ifEmpty { ".tolgee" }
-        link.languages = languagesField.text.splitCsv()
+        link.languages = collectSelection(languagesList, ALL_LANGUAGES).toMutableList()
 
         // Materialise the directory now so the tree renders as "empty" not "missing".
         try {
@@ -152,5 +183,92 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             }
         }
         task.queue()
+    }
+
+    private fun loadProjectMeta(projectId: Long) {
+        val url = urlField.text.trim()
+        val apiKey = String(apiKeyField.password)
+        if (url.isBlank() || apiKey.isBlank()) return
+
+        val myEpoch = ++metaEpoch
+        val task = object : Task.Backgroundable(ideProject, "Loading Tolgee project metadata", false) {
+            private var languages: List<String> = emptyList()
+            private var namespaces: List<String> = emptyList()
+
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                val client = TolgeeApiClient(url, apiKey)
+                languages = runCatching {
+                    client.listProjectLanguages(projectId).map { it.tag }.filter { it.isNotBlank() }
+                }.getOrDefault(emptyList())
+                namespaces = runCatching { client.listProjectNamespaces(projectId) }.getOrDefault(emptyList())
+            }
+
+            override fun onFinished() {
+                if (myEpoch != metaEpoch) return
+                ApplicationManager.getApplication().invokeLater {
+                    populate(namespacesList, ALL_NAMESPACES, namespaces, link.namespaces.toSet())
+                    populate(languagesList, ALL_LANGUAGES, languages, link.languages.toSet())
+                }
+            }
+        }
+        task.queue()
+    }
+
+    private fun populate(
+        list: CheckBoxList<String>,
+        allMarker: String,
+        available: List<String>,
+        previouslySelected: Set<String>,
+    ) {
+        suppressListListeners = true
+        try {
+            val useAll = previouslySelected.isEmpty()
+            val items = linkedMapOf<String, Boolean>()
+            items[allMarker] = useAll
+            for (item in available.sorted()) {
+                items[item] = !useAll && item in previouslySelected
+            }
+            list.setStringItems(items)
+            list.isEnabled = true
+        } finally {
+            suppressListListeners = false
+        }
+    }
+
+    // Checking the "all" row uncrolls specific selections; checking a specific row unchecks "all".
+    private fun installExclusiveAllListener(list: CheckBoxList<String>, allMarker: String) {
+        list.setCheckBoxListListener { index, value ->
+            if (suppressListListeners || !value) return@setCheckBoxListListener
+            suppressListListeners = true
+            try {
+                val item = list.getItemAt(index)
+                if (item == allMarker) {
+                    for (i in 0 until list.itemsCount) {
+                        val other = list.getItemAt(i) ?: continue
+                        if (other != allMarker) list.setItemSelected(other, false)
+                    }
+                } else {
+                    list.setItemSelected(allMarker, false)
+                }
+            } finally {
+                suppressListListeners = false
+            }
+        }
+    }
+
+    private fun collectSelection(list: CheckBoxList<String>, allMarker: String): List<String> {
+        if (list.isItemSelected(allMarker)) return emptyList()
+        val out = mutableListOf<String>()
+        for (i in 0 until list.itemsCount) {
+            val item = list.getItemAt(i) ?: continue
+            if (item != allMarker && list.isItemSelected(i)) out += item
+        }
+        return out
+    }
+
+    private companion object {
+        const val ALL_NAMESPACES = "<All namespaces>"
+        const val ALL_LANGUAGES = "<All languages>"
     }
 }

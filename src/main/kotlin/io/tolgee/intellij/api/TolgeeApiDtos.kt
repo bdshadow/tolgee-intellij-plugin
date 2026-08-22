@@ -69,6 +69,34 @@ data class ProjectsEmbedded(
 )
 
 @Serializable
+data class PagedLanguages(
+    @SerialName("_embedded") val embedded: LanguagesEmbedded? = null,
+    val page: PageInfo? = null,
+)
+
+@Serializable
+data class LanguagesEmbedded(
+    val languages: List<TolgeeLanguage> = emptyList(),
+)
+
+@Serializable
+data class TolgeeNamespace(
+    val id: Long? = null,
+    val name: String? = null,
+)
+
+@Serializable
+data class PagedNamespaces(
+    @SerialName("_embedded") val embedded: NamespacesEmbedded? = null,
+    val page: PageInfo? = null,
+)
+
+@Serializable
+data class NamespacesEmbedded(
+    val namespaces: List<TolgeeNamespace> = emptyList(),
+)
+
+@Serializable
 data class WhoamiResponse(
     val id: Long? = null,
     val username: String? = null,
