@@ -9,13 +9,13 @@ import io.tolgee.intellij.settings.TolgeeAppSettings
  * misconfigured; otherwise returns the ready-to-use link.
  */
 fun requireConfiguredLink(project: Project): TolgeeProjectLink? {
-    if (!TolgeeAppSettings.getInstance().isConfigured) {
-        Messages.showWarningDialog(project, "Configure Tolgee in settings first.", "Tolgee")
-        return null
-    }
     val link = TolgeeProjectLink.getInstance(project)
-    if (!link.isLinked) {
-        Messages.showWarningDialog(project, "Link a Tolgee project first.", "Tolgee")
+    if (!link.isLinked || !TolgeeAppSettings.getInstance().isConfigured) {
+        Messages.showWarningDialog(
+            project,
+            "Open the Tolgee tool window and click + to add a Tolgee project.",
+            "Tolgee",
+        )
         return null
     }
     return link
