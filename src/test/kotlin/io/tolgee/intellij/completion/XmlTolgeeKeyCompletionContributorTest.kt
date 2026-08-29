@@ -103,13 +103,15 @@ class XmlTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
     }
 
     private fun seedCache(vararg names: String) {
-        val keys = names.mapIndexed { idx, name ->
-            TolgeeKey(
-                keyId = (idx + 1).toLong(),
-                keyName = name,
-                translations = mapOf("en" to TolgeeTranslation(text = name)),
+        val entries = names.mapIndexed { idx, name ->
+            TolgeeKeyCache.CachedKey.of(
+                TolgeeKey(
+                    keyId = (idx + 1).toLong(),
+                    keyName = name,
+                    translations = mapOf("en" to TolgeeTranslation(text = name)),
+                ),
             )
         }
-        TolgeeKeyCache.getInstance(project).setIndexForTests(TolgeeKeyCache.Index(keys))
+        TolgeeKeyCache.getInstance(project).setIndexForTests(TolgeeKeyCache.Index(entries))
     }
 }

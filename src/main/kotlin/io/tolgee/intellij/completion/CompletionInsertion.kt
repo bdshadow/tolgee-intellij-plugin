@@ -4,7 +4,7 @@ import com.intellij.codeInsight.completion.InsertHandler
 import com.intellij.codeInsight.completion.InsertionContext
 import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupElementBuilder
-import io.tolgee.intellij.api.TolgeeKey
+import io.tolgee.intellij.project.TolgeeKeyCache
 
 /** Strategies for inserting parameters after the key string. */
 enum class ParamInsertionStyle {
@@ -25,20 +25,17 @@ enum class ParamInsertionStyle {
 object CompletionInsertion {
 
     fun lookupFor(
-        key: TolgeeKey,
+        cached: TolgeeKeyCache.CachedKey,
         style: ParamInsertionStyle,
     ): LookupElement {
-        val params = IcuParams.extractParamNames(key)
-        val sample = key.translations.values.firstOrNull()?.text?.take(60)?.replace('\n', ' ')
-
-        val full = if (key.keyNamespace.isNullOrBlank()) key.keyName
-        else "${key.keyNamespace}:${key.keyName}"
+        val key = cached.key
+        val params = cached.params
 
         var builder = LookupElementBuilder.create(key, key.keyName)
             .withPresentableText(key.keyName)
             .withTypeText(if (params.isEmpty()) "Tolgee" else "Tolgee · {${params.joinToString(", ")}}", true)
-            .withTailText(sample?.let { " — $it" }, true)
-            .withLookupString(full)
+            .withTailText(cached.sample?.let { " — $it" }, true)
+            .withLookupString(cached.fullName)
 
         if (params.isNotEmpty() && style != ParamInsertionStyle.NONE) {
             builder = builder.withInsertHandler(ParamInsertHandler(params, style))

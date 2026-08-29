@@ -15,11 +15,11 @@ class KotlinTolgeeKeyCompletionContributor : CompletionContributor() {
         if (parameters.completionType != CompletionType.BASIC) return
         val project = parameters.position.project
         val cache = TolgeeKeyCache.getInstance(project).current
-        if (cache.keys.isEmpty()) return
+        if (cache.entries.isEmpty()) return
         if (!isInsideTolgeeCallStringArg(parameters.position)) return
 
-        for (key in cache.keys) {
-            result.addElement(CompletionInsertion.lookupFor(key, ParamInsertionStyle.KOTLIN_MAP_OF))
+        for (entry in cache.entries) {
+            result.addElement(CompletionInsertion.lookupFor(entry, ParamInsertionStyle.KOTLIN_MAP_OF))
         }
     }
 

@@ -25,14 +25,14 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
         if (parameters.completionType != CompletionType.BASIC) return
         val project = parameters.position.project
         val cache = TolgeeKeyCache.getInstance(project).current
-        if (cache.keys.isEmpty()) return
+        if (cache.entries.isEmpty()) return
 
         if (LOG_DIAGNOSTICS) logDiagnostics(parameters)
 
         if (!isInsideTolgeeContext(parameters.position)) return
 
-        for (key in cache.keys) {
-            result.addElement(CompletionInsertion.lookupFor(key, ParamInsertionStyle.JS_OBJECT_LITERAL))
+        for (entry in cache.entries) {
+            result.addElement(CompletionInsertion.lookupFor(entry, ParamInsertionStyle.JS_OBJECT_LITERAL))
         }
     }
 

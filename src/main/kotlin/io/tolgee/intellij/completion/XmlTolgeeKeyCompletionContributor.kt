@@ -22,11 +22,11 @@ class XmlTolgeeKeyCompletionContributor : CompletionContributor() {
         if (parameters.completionType != CompletionType.BASIC) return
         val project = parameters.position.project
         val cache = TolgeeKeyCache.getInstance(project).current
-        if (cache.keys.isEmpty()) return
+        if (cache.entries.isEmpty()) return
         if (!isInsideStringNameAttribute(parameters.position)) return
 
-        for (key in cache.keys) {
-            result.addElement(CompletionInsertion.lookupFor(key, ParamInsertionStyle.NONE))
+        for (entry in cache.entries) {
+            result.addElement(CompletionInsertion.lookupFor(entry, ParamInsertionStyle.NONE))
         }
     }
 

@@ -9,6 +9,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import io.tolgee.intellij.api.TolgeeKey
 import io.tolgee.intellij.api.TolgeeTranslation
+import io.tolgee.intellij.completion.IcuParams
 import io.tolgee.intellij.util.TranslationFiles
 import kotlinx.serialization.json.JsonPrimitive
 import org.jetbrains.annotations.TestOnly
@@ -21,7 +22,28 @@ import java.util.concurrent.atomic.AtomicReference
 @Service(Service.Level.PROJECT)
 class TolgeeKeyCache(private val project: Project) {
 
-    data class Index(val keys: List<TolgeeKey> = emptyList())
+    /**
+     * Snapshot of everything a completion contributor needs to render a lookup — precomputed
+     * once at cache-build time so the completion hot path is O(1) per key.
+     */
+    data class CachedKey(
+        val key: TolgeeKey,
+        val params: List<String>,
+        val sample: String?,
+        val fullName: String,
+    ) {
+        companion object {
+            fun of(key: TolgeeKey): CachedKey = CachedKey(
+                key = key,
+                params = IcuParams.extractParamNames(key),
+                sample = key.translations.values.firstOrNull()?.text?.take(60)?.replace('\n', ' '),
+                fullName = if (key.keyNamespace.isNullOrBlank()) key.keyName
+                else "${key.keyNamespace}:${key.keyName}",
+            )
+        }
+    }
+
+    data class Index(val entries: List<CachedKey> = emptyList())
 
     private val ref = AtomicReference(Index())
 
@@ -41,7 +63,7 @@ class TolgeeKeyCache(private val project: Project) {
         val translationsPath = link.translationsPath
 
         val task = object : Task.Backgroundable(project, "Refreshing Tolgee keys from files", true) {
-            private var loaded: List<TolgeeKey> = emptyList()
+            private var loaded: List<CachedKey> = emptyList()
             private var err: Throwable? = null
 
             override fun run(indicator: ProgressIndicator) {
@@ -51,7 +73,7 @@ class TolgeeKeyCache(private val project: Project) {
                         TranslationFiles.resolveDir(project, translationsPath)
                     }
                     loaded = if (dir == null || !dir.isDirectory) emptyList()
-                    else ReadAction.compute<List<TolgeeKey>, RuntimeException> { buildKeys(dir) }
+                    else ReadAction.compute<List<CachedKey>, RuntimeException> { buildKeys(dir) }
                 } catch (e: Exception) {
                     err = e
                 }
@@ -72,9 +94,10 @@ class TolgeeKeyCache(private val project: Project) {
 
     /**
      * Merges every `<lang>.json` / `<ns>/<lang>.json` under [dir] into TolgeeKey
-     * objects. A key is flagged plural if any translation uses `{X, plural, …}`.
+     * objects, wrapping each in a [CachedKey] with completion metadata already computed.
+     * A key is flagged plural if any translation uses `{X, plural, …}`.
      */
-    private fun buildKeys(dir: VirtualFile): List<TolgeeKey> {
+    private fun buildKeys(dir: VirtualFile): List<CachedKey> {
         val builders = linkedMapOf<Pair<String, String>, KeyBuilder>()
         var nextId = 1L
         for (lf in TranslationFiles.listAllLanguageFiles(dir)) {
@@ -93,12 +116,14 @@ class TolgeeKeyCache(private val project: Project) {
             }
         }
         return builders.values.map {
-            TolgeeKey(
-                keyId = it.id,
-                keyName = it.keyName,
-                keyNamespace = it.keyNamespace,
-                keyIsPlural = it.isPlural,
-                translations = it.translations.toMap(),
+            CachedKey.of(
+                TolgeeKey(
+                    keyId = it.id,
+                    keyName = it.keyName,
+                    keyNamespace = it.keyNamespace,
+                    keyIsPlural = it.isPlural,
+                    translations = it.translations.toMap(),
+                ),
             )
         }
     }
