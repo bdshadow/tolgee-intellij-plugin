@@ -26,7 +26,7 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
         val cache = TolgeeKeyCache.getInstance(project).current
         if (cache.entries.isEmpty()) return
 
-        if (LOG_DIAGNOSTICS) logDiagnostics(parameters)
+        if (thisLogger().isTraceEnabled) logDiagnostics(parameters)
 
         if (!isInsideTolgeeContext(parameters.position)) return
 
@@ -45,7 +45,7 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
                 "$type[$text]"
             }
             .toList()
-        thisLogger().warn(
+        thisLogger().trace(
             "[Tolgee] completion fired: lang=${pos.language.id} " +
                 "matched=${isInsideTolgeeContext(pos)}\n  " +
                 ancestors.joinToString("\n  "),
@@ -127,12 +127,5 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
      */
     override fun invokeAutoPopup(position: PsiElement, typeChar: Char): Boolean {
         return isInsideTolgeeContext(position)
-    }
-
-    companion object {
-        // Flip to true when diagnosing why completion doesn't fire — writes a
-        // single WARN line per completion invocation to idea.log with the PSI
-        // ancestor chain at the cursor.
-        private const val LOG_DIAGNOSTICS = false
     }
 }

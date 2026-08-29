@@ -6,6 +6,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
@@ -78,9 +79,12 @@ class PushAction : AnAction() {
             val task = object : Task.Backgroundable(project, "Pushing translations to Tolgee", true) {
                 private var pushed = 0
                 private var err: Throwable? = null
+                private var startedAt = 0L
 
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = false
+                    startedAt = System.nanoTime()
+                    log.info("Push started (project=${link.tolgeeProjectId}, files=${files.size})")
                     val client = TolgeeApiClient(settings.instanceUrl, settings.apiKey)
                     files.forEachIndexed { idx, lf ->
                         indicator.fraction = idx.toDouble() / files.size
@@ -104,6 +108,12 @@ class PushAction : AnAction() {
                 }
 
                 override fun onFinished() {
+                    val ms = if (startedAt != 0L) (System.nanoTime() - startedAt) / 1_000_000 else -1
+                    if (err != null) {
+                        log.warn("Push failed after ${ms}ms (pushed=$pushed): ${err!!.message}", err)
+                    } else {
+                        log.info("Push done: $pushed file(s) in ${ms}ms")
+                    }
                     ApplicationManager.getApplication().invokeLater {
                         if (err != null) {
                             Messages.showErrorDialog(project, err!!.message ?: "Push failed", "Tolgee")
@@ -118,5 +128,7 @@ class PushAction : AnAction() {
             }
             task.queue()
         }
+
+        private val log = Logger.getInstance(PushAction::class.java)
     }
 }

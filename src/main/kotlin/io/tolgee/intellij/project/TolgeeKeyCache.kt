@@ -65,9 +65,11 @@ class TolgeeKeyCache(private val project: Project) {
         val task = object : Task.Backgroundable(project, "Refreshing Tolgee keys from files", true) {
             private var loaded: List<CachedKey> = emptyList()
             private var err: Throwable? = null
+            private var startedAt = 0L
 
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
+                startedAt = System.nanoTime()
                 try {
                     val dir = ReadAction.compute<VirtualFile?, RuntimeException> {
                         TranslationFiles.resolveDir(project, translationsPath)
@@ -80,12 +82,14 @@ class TolgeeKeyCache(private val project: Project) {
             }
 
             override fun onFinished() {
+                val ms = if (startedAt != 0L) (System.nanoTime() - startedAt) / 1_000_000 else -1
                 if (err != null) {
-                    thisLogger().warn("Tolgee key refresh from files failed", err)
+                    thisLogger().warn("Tolgee key refresh from files failed after ${ms}ms", err)
                     onDone?.invoke(Result.failure(err!!))
                     return
                 }
                 ref.set(Index(loaded))
+                thisLogger().info("Tolgee key cache rebuilt: ${loaded.size} key(s) in ${ms}ms")
                 onDone?.invoke(Result.success(loaded.size))
             }
         }

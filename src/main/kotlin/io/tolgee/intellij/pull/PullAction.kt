@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.WriteAction
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
@@ -57,9 +58,14 @@ class PullAction : AnAction() {
                 private var writtenFiles = 0
                 private var keyCount = 0
                 private var err: Throwable? = null
+                private var startedAt = 0L
 
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = true
+                    startedAt = System.nanoTime()
+                    val nsScope = nsOverride?.let { "ns=${it.size}" } ?: "ns=link"
+                    val langScope = langOverride?.let { "lang=${it.size}" } ?: "lang=link"
+                    log.info("Pull started (project=${link.tolgeeProjectId}, dest=$destPath, $nsScope, $langScope)")
                     val client = TolgeeApiClient(settings.instanceUrl, settings.apiKey)
 
                     val allKeys: List<TolgeeKey> = try {
@@ -135,6 +141,12 @@ class PullAction : AnAction() {
                 }
 
                 override fun onFinished() {
+                    val ms = if (startedAt != 0L) (System.nanoTime() - startedAt) / 1_000_000 else -1
+                    if (err != null) {
+                        log.warn("Pull failed after ${ms}ms: ${err!!.message}", err)
+                    } else {
+                        log.info("Pull done: $keyCount key(s), $writtenFiles file(s) in ${ms}ms")
+                    }
                     ApplicationManager.getApplication().invokeLater {
                         if (err != null) {
                             Messages.showErrorDialog(project, err!!.message ?: "Pull failed", "Tolgee")
@@ -157,5 +169,7 @@ class PullAction : AnAction() {
                 .createNotification(message, NotificationType.INFORMATION)
                 .notify(project)
         }
+
+        private val log = Logger.getInstance(PullAction::class.java)
     }
 }

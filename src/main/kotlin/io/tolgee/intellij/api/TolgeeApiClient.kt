@@ -1,5 +1,6 @@
 package io.tolgee.intellij.api
 
+import com.intellij.openapi.diagnostic.Logger
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -44,11 +45,24 @@ class TolgeeApiClient(
     }
 
     private fun execute(req: Request): Response {
-        val resp = http.newCall(req).execute()
+        // The API key sits in the `X-Api-Key` header of `req` — never let it into a log line.
+        val started = System.nanoTime()
+        val resp = try {
+            http.newCall(req).execute()
+        } catch (e: IOException) {
+            val ms = (System.nanoTime() - started) / 1_000_000
+            log.warn("Tolgee ${req.method} ${req.url.encodedPath} failed after ${ms}ms: ${e.message}")
+            throw e
+        }
+        val ms = (System.nanoTime() - started) / 1_000_000
         if (!resp.isSuccessful) {
             val body = resp.body?.string().orEmpty()
             resp.close()
+            log.warn("Tolgee ${req.method} ${req.url.encodedPath} -> ${resp.code} in ${ms}ms: ${body.take(200)}")
             throw TolgeeApiException(resp.code, "Tolgee API ${resp.code}: ${body.take(500)}")
+        }
+        if (log.isDebugEnabled) {
+            log.debug("Tolgee ${req.method} ${req.url.encodedPath} -> ${resp.code} in ${ms}ms")
         }
         return resp
     }
@@ -191,6 +205,8 @@ class TolgeeApiClient(
     }
 
     private companion object {
+        val log = Logger.getInstance(TolgeeApiClient::class.java)
+
         // Shared across TolgeeApiClient instances so we reuse connection/thread pools instead of
         // spinning up a fresh OkHttpClient per dialog interaction.
         val sharedHttp: OkHttpClient = OkHttpClient.Builder()
