@@ -1,6 +1,10 @@
 package io.tolgee.intellij.api
 
+import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.extensions.PluginId
+import com.intellij.openapi.util.SystemInfo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -42,6 +46,9 @@ class TolgeeApiClient(
             .url(urlBuilder.build())
             .header("X-Api-Key", apiKey)
             .header("Accept", "application/json")
+            .header("User-Agent", userAgent)
+            .header("X-Tolgee-Client", "intellij-plugin")
+            .header("X-Tolgee-Client-Version", pluginVersion)
     }
 
     private fun execute(req: Request): Response {
@@ -214,5 +221,21 @@ class TolgeeApiClient(
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()
+
+        // Both `PluginManagerCore.getPlugin` and `ApplicationInfo.getInstance` need the IntelliJ
+        // Application to be initialised — pure JUnit tests call the API client without it, so fall
+        // back to a minimal identifier when the platform isn't around.
+        val pluginVersion: String by lazy {
+            runCatching { PluginManagerCore.getPlugin(PluginId.getId("io.tolgee.intellij"))?.version }
+                .getOrNull().orEmpty().ifEmpty { "unknown" }
+        }
+
+        val userAgent: String by lazy {
+            val ide = runCatching { ApplicationInfo.getInstance().build.asString() }.getOrNull()
+            val os = "${SystemInfo.OS_NAME} ${SystemInfo.OS_VERSION}"
+            val arch = SystemInfo.OS_ARCH
+            if (ide != null) "Tolgee-IntelliJ/$pluginVersion ($ide; $os; $arch)"
+            else "Tolgee-IntelliJ/$pluginVersion ($os; $arch)"
+        }
     }
 }

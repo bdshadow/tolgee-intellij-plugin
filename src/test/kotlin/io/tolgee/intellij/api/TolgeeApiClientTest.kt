@@ -38,6 +38,18 @@ class TolgeeApiClientTest {
     }
 
     @Test
+    fun `every request carries plugin client-identification headers`() {
+        server.enqueue(jsonResponse("""{"id":1,"name":"demo"}"""))
+        client.getProject(1)
+        val req = server.takeRequest()
+        assertEquals("intellij-plugin", req.getHeader("X-Tolgee-Client"))
+        val version = req.getHeader("X-Tolgee-Client-Version")
+        assertNotNull("X-Tolgee-Client-Version should be present", version)
+        val ua = req.getHeader("User-Agent") ?: ""
+        assertTrue("User-Agent should announce the plugin, got: $ua", ua.startsWith("Tolgee-IntelliJ/"))
+    }
+
+    @Test
     fun `currentApiKeyProjectId swallows non-2xx and returns null`() {
         server.enqueue(MockResponse().setResponseCode(403))
         assertNull(client.currentApiKeyProjectId())
