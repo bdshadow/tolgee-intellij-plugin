@@ -1,15 +1,12 @@
 package io.tolgee.intellij.completion
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
-import io.tolgee.intellij.api.TolgeeKey
-import io.tolgee.intellij.api.TolgeeTranslation
-import io.tolgee.intellij.project.TolgeeKeyCache
 
 class XmlTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
 
     override fun tearDown() {
         try {
-            TolgeeKeyCache.getInstance(project).setIndexForTests(TolgeeKeyCache.Index())
+            clearCache(project)
         } finally {
             super.tearDown()
         }
@@ -17,7 +14,7 @@ class XmlTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
 
     fun testCompletesKeysInsideStringName() {
         // Two keys sharing the prefix so completion doesn't auto-insert.
-        seedCache("greeting", "grocery", "farewell")
+        seedCache(project, "greeting", "grocery", "farewell")
         myFixture.configureByText(
             "strings.xml",
             """
@@ -34,7 +31,7 @@ class XmlTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
     }
 
     fun testDoesNotCompleteInsideStringBody() {
-        seedCache("greeting", "farewell")
+        seedCache(project, "greeting", "farewell")
         myFixture.configureByText(
             "strings.xml",
             """
@@ -52,7 +49,7 @@ class XmlTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
     }
 
     fun testDoesNotCompleteInOtherAttributes() {
-        seedCache("greeting", "farewell")
+        seedCache(project, "greeting", "farewell")
         myFixture.configureByText(
             "strings.xml",
             """
@@ -85,7 +82,7 @@ class XmlTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
     }
 
     fun testDoesNotCompleteOutsideResourcesRoot() {
-        seedCache("greeting", "farewell")
+        seedCache(project, "greeting", "farewell")
         myFixture.configureByText(
             "config.xml",
             """
@@ -100,18 +97,5 @@ class XmlTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
             "should only fire under <resources>, got $lookups",
             "greeting" in lookups,
         )
-    }
-
-    private fun seedCache(vararg names: String) {
-        val entries = names.mapIndexed { idx, name ->
-            TolgeeKeyCache.CachedKey.of(
-                TolgeeKey(
-                    keyId = (idx + 1).toLong(),
-                    keyName = name,
-                    translations = mapOf("en" to TolgeeTranslation(text = name)),
-                ),
-            )
-        }
-        TolgeeKeyCache.getInstance(project).setIndexForTests(TolgeeKeyCache.Index(entries))
     }
 }
