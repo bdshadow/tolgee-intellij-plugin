@@ -64,12 +64,17 @@ object CompletionInsertion {
             }
         }
 
-        /** Insert after the closing quote of the key, before any `,` / `)`. */
+        /**
+         * `tailOffset` sits inside the string literal (between the inserted key text and the
+         * closing quote), so first step past that quote to land in the enclosing call, then past
+         * any whitespace to sit just before the next `,` / `)`.
+         */
         private fun findInsertOffset(context: InsertionContext, tailOffset: Int): Int {
             val text = context.document.charsSequence
             var i = tailOffset
+            if (i < text.length && (text[i] == '\'' || text[i] == '"' || text[i] == '`')) i++
             while (i < text.length && text[i].isWhitespace()) i++
-            return if (i < text.length && (text[i] == ',' || text[i] == ')')) i else tailOffset
+            return i
         }
 
         /** Returns `(text, caretOffsetWithinText)` or null if there's nothing to insert. */

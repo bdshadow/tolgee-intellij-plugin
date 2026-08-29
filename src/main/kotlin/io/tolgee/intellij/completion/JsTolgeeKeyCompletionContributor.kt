@@ -6,7 +6,6 @@ import com.intellij.codeInsight.completion.CompletionResultSet
 import com.intellij.codeInsight.completion.CompletionType
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.psi.PsiElement
-import com.intellij.psi.util.PsiTreeUtil
 import io.tolgee.intellij.project.TolgeeKeyCache
 
 /**
@@ -61,9 +60,11 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
             val type = rawType.uppercase()
 
             // 1. Tolgee call expression (`t(...)`, `*.t(...)`, `*.translate(...)`)
+            //    The first *direct* child is the method reference — PsiTreeUtil.firstChild
+            //    recurses to the leftmost leaf, which loses the qualifier (`tolgee.t` → `tolgee`).
             if (type.contains("CALL") && type.contains("EXPRESSION")) {
-                val ref = PsiTreeUtil.firstChild(cur)
-                if (isTolgeeCall(ref.text)) return true
+                val ref = cur.firstChild
+                if (ref != null && isTolgeeCall(ref.text)) return true
             }
 
             // 2. JSX/TSX attribute named `keyName` on a `<T>` tag.
