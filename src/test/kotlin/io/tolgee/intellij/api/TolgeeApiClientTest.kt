@@ -122,7 +122,7 @@ class TolgeeApiClientTest {
     }
 
     @Test
-    fun `listProjectNamespaces filters blank names and returns only names`() {
+    fun `listProjectNamespaces returns names including the default (empty) namespace`() {
         server.enqueue(
             jsonResponse(
                 """{"_embedded":{"namespaces":[
@@ -134,8 +134,19 @@ class TolgeeApiClientTest {
             ),
         )
         val ns = client.listProjectNamespaces(9)
-        assertEquals(listOf("emails", "invoices"), ns)
+        assertEquals(listOf("", "emails", "invoices"), ns)
         assertTrue(server.takeRequest().path!!.startsWith("/v2/projects/9/used-namespaces"))
+    }
+
+    @Test
+    fun `listProjectNamespaces treats null name as default namespace`() {
+        server.enqueue(
+            jsonResponse(
+                """{"_embedded":{"namespaces":[{"id":null,"name":null}]},
+                    "page":{"size":100,"number":0,"totalElements":1,"totalPages":1}}""",
+            ),
+        )
+        assertEquals(listOf(""), client.listProjectNamespaces(1))
     }
 
     @Test

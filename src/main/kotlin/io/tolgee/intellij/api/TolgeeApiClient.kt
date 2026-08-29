@@ -26,11 +26,7 @@ class TolgeeApiClient(
     private val baseUrl: String,
     private val apiKey: String,
 ) {
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .build()
+    private val http: OkHttpClient = sharedHttp
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -111,7 +107,7 @@ class TolgeeApiClient(
         return collected
     }
 
-    /** Only namespaces that are actually referenced by keys; the default (unnamed) namespace is filtered out. */
+    /** Namespaces referenced by keys. The default (unnamed) namespace is returned as an empty string. */
     fun listProjectNamespaces(projectId: Long): List<String> {
         val collected = mutableListOf<String>()
         var page = 0
@@ -120,7 +116,7 @@ class TolgeeApiClient(
                 "/v2/projects/$projectId/used-namespaces",
                 mapOf("page" to page.toString(), "size" to "100"),
             )
-            collected += resp.embedded?.namespaces.orEmpty().mapNotNull { it.name?.takeIf { n -> n.isNotBlank() } }
+            collected += resp.embedded?.namespaces.orEmpty().map { it.name.orEmpty() }
             val info = resp.page ?: break
             if (page + 1 >= info.totalPages) break
             page++
@@ -192,5 +188,15 @@ class TolgeeApiClient(
             .post(multipart as RequestBody)
             .build()
         execute(req).close()
+    }
+
+    private companion object {
+        // Shared across TolgeeApiClient instances so we reuse connection/thread pools instead of
+        // spinning up a fresh OkHttpClient per dialog interaction.
+        val sharedHttp: OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .build()
     }
 }

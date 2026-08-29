@@ -25,6 +25,8 @@ import io.tolgee.intellij.pull.PullAction
 import io.tolgee.intellij.settings.TolgeeAppSettings
 import io.tolgee.intellij.util.TranslationFiles
 import java.awt.event.ItemEvent
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
 import javax.swing.DefaultComboBoxModel
 import javax.swing.JButton
 import javax.swing.JComponent
@@ -122,7 +124,7 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         val selected = projectCombo.selectedItem as? TolgeeProject ?: return
         link.tolgeeProjectId = selected.id
         link.tolgeeProjectName = selected.name
-        link.namespaces = collectSelection(namespacesList, ALL_NAMESPACES).toMutableList()
+        link.namespaces = collectNamespaces().toMutableList()
         link.translationsPath = pathField.text.trim().ifEmpty { ".tolgee" }
         link.languages = collectSelection(languagesList, ALL_LANGUAGES).toMutableList()
 
@@ -192,28 +194,64 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
 
         val myEpoch = ++metaEpoch
         val task = object : Task.Backgroundable(ideProject, "Loading Tolgee project metadata", false) {
-            private var languages: List<String> = emptyList()
-            private var namespaces: List<String> = emptyList()
+            private var languagesResult: Result<List<String>> = Result.success(emptyList())
+            private var namespacesResult: Result<List<String>> = Result.success(emptyList())
 
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
                 val client = TolgeeApiClient(url, apiKey)
-                languages = runCatching {
-                    client.listProjectLanguages(projectId).map { it.tag }.filter { it.isNotBlank() }
-                }.getOrDefault(emptyList())
-                namespaces = runCatching { client.listProjectNamespaces(projectId) }.getOrDefault(emptyList())
+                // Run both fetches in parallel: languages on a pooled thread, namespaces here.
+                val langFuture = ApplicationManager.getApplication().executeOnPooledThread(
+                    Callable {
+                        runCatching {
+                            client.listProjectLanguages(projectId).map { it.tag }.filter { it.isNotBlank() }
+                        }
+                    },
+                )
+                namespacesResult = runCatching { client.listProjectNamespaces(projectId) }
+                languagesResult = try {
+                    langFuture.get()
+                } catch (e: ExecutionException) {
+                    Result.failure(e.cause ?: e)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    Result.failure(e)
+                }
             }
 
             override fun onFinished() {
                 if (myEpoch != metaEpoch) return
                 ApplicationManager.getApplication().invokeLater {
-                    populate(namespacesList, ALL_NAMESPACES, namespaces, link.namespaces.toSet())
-                    populate(languagesList, ALL_LANGUAGES, languages, link.languages.toSet())
+                    val errors = listOfNotNull(namespacesResult.exceptionOrNull(), languagesResult.exceptionOrNull())
+                    if (errors.isNotEmpty()) {
+                        Messages.showWarningDialog(
+                            ideProject,
+                            "Failed to load project metadata:\n" +
+                                errors.joinToString("\n") { it.message ?: it.javaClass.simpleName },
+                            "Tolgee",
+                        )
+                    }
+                    populateNamespaces(namespacesResult.getOrDefault(emptyList()), link.namespaces.toSet())
+                    populate(languagesList, ALL_LANGUAGES, languagesResult.getOrDefault(emptyList()), link.languages.toSet())
                 }
             }
         }
         task.queue()
     }
+
+    private fun populateNamespaces(available: List<String>, previouslySelected: Set<String>) {
+        // Present the default (unnamed) namespace as a labelled row; store it as "" on save.
+        val labels = available.map { if (it.isEmpty()) DEFAULT_NAMESPACE else it }
+        val previousLabels = previouslySelected.mapTo(mutableSetOf()) {
+            if (it.isEmpty()) DEFAULT_NAMESPACE else it
+        }
+        populate(namespacesList, ALL_NAMESPACES, labels, previousLabels)
+    }
+
+    private fun collectNamespaces(): List<String> =
+        collectSelection(namespacesList, ALL_NAMESPACES).map {
+            if (it == DEFAULT_NAMESPACE) "" else it
+        }
 
     private fun populate(
         list: CheckBoxList<String>,
@@ -236,20 +274,26 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         }
     }
 
-    // Checking the "all" row uncrolls specific selections; checking a specific row unchecks "all".
+    // Enforces two invariants:
+    //  - Checking "all" unchecks specific rows; checking a specific row unchecks "all".
+    //  - At least one row is always checked — unchecking the last one re-checks "all".
     private fun installExclusiveAllListener(list: CheckBoxList<String>, allMarker: String) {
         list.setCheckBoxListListener { index, value ->
-            if (suppressListListeners || !value) return@setCheckBoxListListener
+            if (suppressListListeners) return@setCheckBoxListListener
             suppressListListeners = true
             try {
                 val item = list.getItemAt(index)
-                if (item == allMarker) {
-                    for (i in 0 until list.itemsCount) {
-                        val other = list.getItemAt(i) ?: continue
-                        if (other != allMarker) list.setItemSelected(other, false)
+                if (value) {
+                    if (item == allMarker) {
+                        for (i in 0 until list.itemsCount) {
+                            val other = list.getItemAt(i) ?: continue
+                            if (other != allMarker) list.setItemSelected(other, false)
+                        }
+                    } else {
+                        list.setItemSelected(allMarker, false)
                     }
-                } else {
-                    list.setItemSelected(allMarker, false)
+                } else if ((0 until list.itemsCount).none { list.isItemSelected(it) }) {
+                    list.setItemSelected(allMarker, true)
                 }
             } finally {
                 suppressListListeners = false
@@ -270,5 +314,6 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     private companion object {
         const val ALL_NAMESPACES = "<All namespaces>"
         const val ALL_LANGUAGES = "<All languages>"
+        const val DEFAULT_NAMESPACE = "<Default namespace>"
     }
 }
