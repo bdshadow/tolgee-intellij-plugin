@@ -190,6 +190,11 @@ class TolgeeApiClient(
             )
         }
 
+        val paramsJson = json.encodeToString(JsonObject.serializer(), params)
+        if (log.isDebugEnabled) {
+            log.debug("Import params for project=$projectId, lang=$languageTag, ns=$namespace: $paramsJson")
+        }
+
         val multipart = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart(
@@ -200,15 +205,24 @@ class TolgeeApiClient(
             .addFormDataPart(
                 "params",
                 null,
-                json.encodeToString(JsonObject.serializer(), params)
-                    .toRequestBody("application/json".toMediaType()),
+                paramsJson.toRequestBody("application/json".toMediaType()),
             )
             .build()
 
         val req = request("/v2/projects/$projectId/single-step-import")
             .post(multipart as RequestBody)
             .build()
-        execute(req).close()
+        execute(req).use { resp ->
+            // `single-step-import` returns 200 even when the server accepts but silently drops the
+            // import (e.g., unknown language, missing scope). Surface whatever body it did return so
+            // silent no-ops show up at INFO level, not just DEBUG.
+            val body = resp.body?.string().orEmpty().trim()
+            if (body.isNotEmpty()) {
+                log.info("Import response for project=$projectId, lang=$languageTag: ${body.take(500)}")
+            } else {
+                log.info("Import response for project=$projectId, lang=$languageTag: <empty body>")
+            }
+        }
     }
 
     private companion object {
