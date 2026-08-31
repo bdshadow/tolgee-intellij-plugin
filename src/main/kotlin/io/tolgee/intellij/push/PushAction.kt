@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
@@ -17,6 +18,8 @@ import io.tolgee.intellij.project.TolgeeProjectLink
 import io.tolgee.intellij.project.requireConfiguredLink
 import io.tolgee.intellij.settings.TolgeeAppSettings
 import io.tolgee.intellij.util.TranslationFiles
+import java.nio.file.Files
+import java.nio.file.Paths
 
 class PushAction : AnAction() {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
@@ -76,6 +79,10 @@ class PushAction : AnAction() {
             )
             if (confirm != Messages.YES) return
 
+            // Any file the user is editing may still have unsaved changes in the editor buffer;
+            // flush them to disk (must run on EDT) before the background task reads bytes.
+            FileDocumentManager.getInstance().saveAllDocuments()
+
             val task = object : Task.Backgroundable(project, "Pushing translations to Tolgee", true) {
                 private var pushed = 0
                 private var err: Throwable? = null
@@ -91,10 +98,13 @@ class PushAction : AnAction() {
                         indicator.text = if (lf.namespace == null) "Pushing ${lf.language}…"
                         else "Pushing ${lf.namespace}/${lf.language}…"
                         try {
+                            // Read straight from disk: VirtualFile.contentsToByteArray caches, and can
+                            // serve stale bytes when the file was written outside IntelliJ.
+                            val bytes = Files.readAllBytes(Paths.get(lf.file.path))
                             client.importFlatJson(
                                 projectId = link.tolgeeProjectId,
                                 languageTag = lf.language,
-                                flatJsonBytes = lf.file.contentsToByteArray(),
+                                flatJsonBytes = bytes,
                                 namespace = lf.namespace,
                                 overrideExisting = true,
                             )
