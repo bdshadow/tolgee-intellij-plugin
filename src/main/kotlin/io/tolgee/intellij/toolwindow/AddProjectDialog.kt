@@ -2,6 +2,7 @@ package io.tolgee.intellij.toolwindow
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
@@ -129,15 +130,43 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     }
 
     override fun doOKAction() {
+        val selected = projectCombo.selectedItem as? TolgeeProject ?: return
+        val newNamespaces = collectNamespaces()
+        val newLanguages = collectSelection(languagesList, ALL_LANGUAGES)
+        val newPath = pathField.text.trim().ifEmpty { ".tolgee" }
+
+        // If the user narrowed the filter in Edit, offer to remove local files that are no longer
+        // covered by the default (toolbar) scope. Right-click Push/Pull still works per file, so
+        // this is opt-in cleanup, not a functional requirement.
+        if (!isCreation && newPath == link.translationsPath) {
+            val orphaned = filesNoLongerCovered(newPath, newLanguages, newNamespaces)
+            if (orphaned.isNotEmpty()) {
+                val listing = orphaned.joinToString("\n") { "  • ${labelFor(it)}" }
+                val choice = Messages.showYesNoCancelDialog(
+                    ideProject,
+                    "These files are no longer covered by the language/namespace filter:\n\n$listing\n\n" +
+                        "Delete them from disk?",
+                    "Tolgee",
+                    "Delete",
+                    "Keep",
+                    Messages.getCancelButton(),
+                    Messages.getQuestionIcon(),
+                )
+                when (choice) {
+                    Messages.YES -> deleteOrphaned(orphaned)
+                    Messages.NO -> Unit
+                    else -> return // Cancel — keep dialog open.
+                }
+            }
+        }
+
         settings.instanceUrl = urlField.text.trim()
         settings.apiKey = String(apiKeyField.password)
-
-        val selected = projectCombo.selectedItem as? TolgeeProject ?: return
         link.tolgeeProjectId = selected.id
         link.tolgeeProjectName = selected.name
-        link.namespaces = collectNamespaces().toMutableList()
-        link.translationsPath = pathField.text.trim().ifEmpty { ".tolgee" }
-        link.languages = collectSelection(languagesList, ALL_LANGUAGES).toMutableList()
+        link.namespaces = newNamespaces.toMutableList()
+        link.translationsPath = newPath
+        link.languages = newLanguages.toMutableList()
 
         // Materialise the directory now so the tree renders as "empty" not "missing".
         try {
@@ -153,6 +182,41 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             PullAction.runFor(ideProject)
         } else {
             TolgeeKeyCache.getInstance(ideProject).refreshAsync()
+        }
+    }
+
+    /**
+     * Local files whose namespace or language is not covered by the new filter. An empty filter
+     * means "all", so nothing is orphaned in that direction.
+     */
+    private fun filesNoLongerCovered(
+        newPath: String,
+        newLanguages: List<String>,
+        newNamespaces: List<String>,
+    ): List<TranslationFiles.LanguageFile> {
+        val dir = TranslationFiles.resolveDir(ideProject, newPath) ?: return emptyList()
+        if (!dir.isDirectory) return emptyList()
+        val langSet = newLanguages.toSet()
+        val nsSet = newNamespaces.toSet()
+        return TranslationFiles.listAllLanguageFiles(dir).filter { lf ->
+            val langOut = langSet.isNotEmpty() && lf.language !in langSet
+            val nsOut = nsSet.isNotEmpty() && (lf.namespace ?: "") !in nsSet
+            langOut || nsOut
+        }
+    }
+
+    private fun labelFor(lf: TranslationFiles.LanguageFile): String =
+        if (lf.namespace == null) "${lf.language}.json" else "${lf.namespace}/${lf.language}.json"
+
+    private fun deleteOrphaned(files: List<TranslationFiles.LanguageFile>) {
+        WriteAction.runAndWait<RuntimeException> {
+            for (lf in files) {
+                try {
+                    lf.file.delete(this)
+                } catch (_: Exception) {
+                    // Best-effort — the notification would spam if we surfaced each failure.
+                }
+            }
         }
     }
 
