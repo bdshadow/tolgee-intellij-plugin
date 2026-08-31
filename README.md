@@ -111,7 +111,7 @@ key string and runs an inline live template so you can tab through placeholders.
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | **Add dialog → Load projects**                     | `GET /v2/api-keys/current` → then `GET /v2/projects/{boundId}` (PAK) or `GET /v2/projects` (PAT) |
 | **Pull**                                           | `GET /v2/projects/{id}/translations` (paged, `size=200`)                                      |
-| **Push**                                           | `POST /v2/projects/{id}/single-step-import` per file (multipart, `format=JSON_TOLGEE`)        |
+| **Push**                                           | `POST /v2/projects/{id}/single-step-import` per file (multipart, `format=JSON_ICU`)           |
 | **Refresh**                                        | *(none — reads local files)*                                                                  |
 
 All requests send `X-Api-Key: <apiKey>`.

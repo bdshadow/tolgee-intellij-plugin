@@ -182,7 +182,7 @@ class TolgeeApiClient(
                         buildJsonObject {
                             put("fileName", JsonPrimitive("$languageTag.json"))
                             put("languageTag", JsonPrimitive(languageTag))
-                            put("format", JsonPrimitive("JSON_TOLGEE"))
+                            put("format", JsonPrimitive("JSON_ICU"))
                             if (!namespace.isNullOrBlank()) put("namespace", JsonPrimitive(namespace))
                         },
                     )
