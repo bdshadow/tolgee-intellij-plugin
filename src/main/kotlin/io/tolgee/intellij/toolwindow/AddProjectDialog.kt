@@ -135,6 +135,12 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         val newLanguages = collectSelection(languagesList, ALL_LANGUAGES)
         val newPath = pathField.text.trim().ifEmpty { ".tolgee" }
 
+        // Snapshot pre-mutation filters so we can detect widening after `link.*` is reassigned.
+        val filterWidened = !isCreation && (
+            filterWasWidened(link.languages, newLanguages) ||
+                filterWasWidened(link.namespaces, newNamespaces)
+            )
+
         // If the user narrowed the filter in Edit, offer to remove local files that are no longer
         // covered by the default (toolbar) scope. Right-click Push/Pull still works per file, so
         // this is opt-in cleanup, not a functional requirement.
@@ -177,12 +183,23 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
 
         super.doOKAction()
         link.fireChanged()
-        if (isCreation && autoPullCheckbox.isSelected) {
+        val autoPull = (isCreation && autoPullCheckbox.isSelected) || filterWidened
+        if (autoPull) {
             // Pull refreshes the cache itself, so no extra call here.
             PullAction.runFor(ideProject)
         } else {
             TolgeeKeyCache.getInstance(ideProject).refreshAsync()
         }
+    }
+
+    /**
+     * True when the new selection covers something the old one didn't. Empty list means "all",
+     * so `[] → [a, b]` isn't widening (still a subset of "all"), whereas `[a] → []` widens to all.
+     */
+    private fun filterWasWidened(old: List<String>, new: List<String>): Boolean = when {
+        old.isEmpty() -> false
+        new.isEmpty() -> true
+        else -> !old.toSet().containsAll(new)
     }
 
     /**
