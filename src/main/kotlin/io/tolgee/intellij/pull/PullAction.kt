@@ -68,15 +68,26 @@ class PullAction : AnAction() {
                     log.info("Pull started (project=${link.tolgeeProjectId}, dest=$destPath, $nsScope, $langScope)")
                     val client = TolgeeApiClient(settings.instanceUrl, settings.apiKey)
 
-                    val allKeys: List<TolgeeKey> = try {
-                        client.listAllKeys(link.tolgeeProjectId)
+                    val nsFilter: Set<String>? = nsOverride ?: link.namespaces.toSet().takeIf { it.isNotEmpty() }
+                    val langFilter: Set<String>? = langOverride ?: link.languages.toSet().takeIf { it.isNotEmpty() }
+
+                    // The /translations endpoint returns only a subset of languages when `languages`
+                    // is unspecified (typically base + one). To honour "all languages", resolve the
+                    // full project language list here and pass it explicitly.
+                    val requestedLangs: List<String> = try {
+                        langFilter?.toList()
+                            ?: client.listProjectLanguages(link.tolgeeProjectId).map { it.tag }
                     } catch (e: Exception) {
                         err = e
                         return
                     }
 
-                    val nsFilter: Set<String>? = nsOverride ?: link.namespaces.toSet().takeIf { it.isNotEmpty() }
-                    val langFilter: Set<String>? = langOverride ?: link.languages.toSet().takeIf { it.isNotEmpty() }
+                    val allKeys: List<TolgeeKey> = try {
+                        client.listAllKeys(link.tolgeeProjectId, requestedLangs)
+                    } catch (e: Exception) {
+                        err = e
+                        return
+                    }
                     val filtered = allKeys.filter { k ->
                         nsFilter == null || (k.keyNamespace ?: "") in nsFilter
                     }
