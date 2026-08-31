@@ -69,6 +69,8 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             if (e.stateChange == ItemEvent.SELECTED) {
                 (e.item as? TolgeeProject)?.let { loadProjectMeta(it.id) }
             }
+            // DialogWrapper only auto-tracks text/checkbox fields; poke the OK state on combo changes.
+            refreshOkState()
         }
         installExclusiveAllListener(namespacesList, ALL_NAMESPACES)
         installExclusiveAllListener(languagesList, ALL_LANGUAGES)
@@ -82,6 +84,11 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             projectCombo.model = model
             projectCombo.selectedIndex = 0
         }
+        refreshOkState()
+    }
+
+    private fun refreshOkState() {
+        isOKActionEnabled = doValidate() == null
     }
 
     override fun createCenterPanel(): JComponent = panel {
@@ -181,6 +188,7 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
                     result.forEach { model.addElement(it) }
                     projectCombo.model = model
                     if (result.size == 1) projectCombo.selectedIndex = 0
+                    refreshOkState()
                 }
             }
         }
@@ -232,7 +240,7 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
                         )
                     }
                     populateNamespaces(namespacesResult.getOrDefault(emptyList()), link.namespaces.toSet())
-                    populate(languagesList, ALL_LANGUAGES, languagesResult.getOrDefault(emptyList()), link.languages.toSet())
+                    populateLanguages(languagesResult.getOrDefault(emptyList()), link.languages.toSet())
                 }
             }
         }
@@ -242,10 +250,35 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     private fun populateNamespaces(available: List<String>, previouslySelected: Set<String>) {
         // Present the default (unnamed) namespace as a labelled row; store it as "" on save.
         val labels = available.map { if (it.isEmpty()) DEFAULT_NAMESPACE else it }
+        if (renderCollapsedIfTrivial(namespacesList, labels)) return
         val previousLabels = previouslySelected.mapTo(mutableSetOf()) {
             if (it.isEmpty()) DEFAULT_NAMESPACE else it
         }
         populate(namespacesList, ALL_NAMESPACES, labels, previousLabels)
+    }
+
+    private fun populateLanguages(available: List<String>, previouslySelected: Set<String>) {
+        if (renderCollapsedIfTrivial(languagesList, available)) return
+        populate(languagesList, ALL_LANGUAGES, available, previouslySelected)
+    }
+
+    /**
+     * When the project offers 0 or 1 real choice, showing "<All …>" alongside a single specific
+     * row is redundant. Collapse to just that single row, disabled — the filter has no effect.
+     * Returns true if it handled the render; false if the caller should fall through to [populate].
+     */
+    private fun renderCollapsedIfTrivial(list: CheckBoxList<String>, labels: List<String>): Boolean {
+        if (labels.size > 1) return false
+        suppressListListeners = true
+        try {
+            val items = linkedMapOf<String, Boolean>()
+            labels.firstOrNull()?.let { items[it] = true }
+            list.setStringItems(items)
+            list.isEnabled = false
+        } finally {
+            suppressListListeners = false
+        }
+        return true
     }
 
     private fun collectNamespaces(): List<String> =
