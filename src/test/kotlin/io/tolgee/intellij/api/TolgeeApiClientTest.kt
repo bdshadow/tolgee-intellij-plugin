@@ -4,6 +4,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -112,6 +113,34 @@ class TolgeeApiClientTest {
     }
 
     @Test
+    fun `listAllKeys sends languages query param when provided`() {
+        // Pull relies on this: without an explicit list the server defaults to a subset,
+        // which is why we resolve the full language set client-side and pass it here.
+        server.enqueue(
+            jsonResponse(
+                """{"_embedded":{"keys":[]},
+                    "page":{"size":200,"number":0,"totalElements":0,"totalPages":0}}""",
+            ),
+        )
+        client.listAllKeys(99, listOf("en", "de", "fr"))
+        val path = server.takeRequest().path!!
+        assertTrue("expected languages query param, got path: $path", path.contains("languages=en%2Cde%2Cfr"))
+    }
+
+    @Test
+    fun `listAllKeys omits languages query param when list is empty`() {
+        server.enqueue(
+            jsonResponse(
+                """{"_embedded":{"keys":[]},
+                    "page":{"size":200,"number":0,"totalElements":0,"totalPages":0}}""",
+            ),
+        )
+        client.listAllKeys(99)
+        val path = server.takeRequest().path!!
+        assertFalse("did not expect languages query param, got path: $path", path.contains("languages="))
+    }
+
+    @Test
     fun `listProjectLanguages walks pages and decodes tags`() {
         server.enqueue(
             jsonResponse(
@@ -186,6 +215,7 @@ class TolgeeApiClientTest {
         assertTrue("body should contain uploaded file", body.contains("de.json"))
         assertTrue("body should contain namespace", body.contains("\"namespace\":\"emails\""))
         assertTrue("body should contain OVERRIDE", body.contains("\"forceMode\":\"OVERRIDE\""))
+        assertTrue("body should declare JSON_ICU format", body.contains("\"format\":\"JSON_ICU\""))
         assertTrue("body should contain the JSON payload", body.contains("Hallo"))
     }
 
