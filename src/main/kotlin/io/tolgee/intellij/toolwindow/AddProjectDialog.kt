@@ -1,6 +1,7 @@
 package io.tolgee.intellij.toolwindow
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
@@ -76,13 +77,16 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         installExclusiveAllListener(languagesList, ALL_LANGUAGES)
         init()
         if (link.isLinked) {
-            // Show current selection as a stub so OK is enabled without reloading;
-            // the selection change also kicks off a metadata load.
+            // Show current selection as a stub so OK is enabled without reloading.
             val stub = TolgeeProject(id = link.tolgeeProjectId, name = link.tolgeeProjectName)
             val model = DefaultComboBoxModel<TolgeeProject>()
             model.addElement(stub)
             projectCombo.model = model
             projectCombo.selectedIndex = 0
+            // Swing collapses the setModel+selectedIndex sequence into no ItemEvent when the
+            // selection is already index 0, so the combo listener never fires and metadata
+            // never loads. Kick it off explicitly for edit mode.
+            loadProjectMeta(link.tolgeeProjectId)
         }
         refreshOkState()
     }
@@ -201,50 +205,44 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         if (url.isBlank() || apiKey.isBlank()) return
 
         val myEpoch = ++metaEpoch
-        val task = object : Task.Backgroundable(ideProject, "Loading Tolgee project metadata", false) {
-            private var languagesResult: Result<List<String>> = Result.success(emptyList())
-            private var namespacesResult: Result<List<String>> = Result.success(emptyList())
-
-            override fun run(indicator: ProgressIndicator) {
-                indicator.isIndeterminate = true
-                val client = TolgeeApiClient(url, apiKey)
-                // Run both fetches in parallel: languages on a pooled thread, namespaces here.
-                val langFuture = ApplicationManager.getApplication().executeOnPooledThread(
-                    Callable {
-                        runCatching {
-                            client.listProjectLanguages(projectId).map { it.tag }.filter { it.isNotBlank() }
-                        }
-                    },
-                )
-                namespacesResult = runCatching { client.listProjectNamespaces(projectId) }
-                languagesResult = try {
-                    langFuture.get()
-                } catch (e: ExecutionException) {
-                    Result.failure(e.cause ?: e)
-                } catch (e: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    Result.failure(e)
-                }
-            }
-
-            override fun onFinished() {
-                if (myEpoch != metaEpoch) return
-                ApplicationManager.getApplication().invokeLater {
-                    val errors = listOfNotNull(namespacesResult.exceptionOrNull(), languagesResult.exceptionOrNull())
-                    if (errors.isNotEmpty()) {
-                        Messages.showWarningDialog(
-                            ideProject,
-                            "Failed to load project metadata:\n" +
-                                errors.joinToString("\n") { it.message ?: it.javaClass.simpleName },
-                            "Tolgee",
-                        )
+        // Task.Backgroundable's onFinished runs on the EDT under NON_MODAL modality, so its UI
+        // callback is queued behind this dialog's modality and doesn't fire until the dialog closes.
+        // Use a raw pooled thread + invokeLater(..., ModalityState.any()) instead — the metaEpoch
+        // guard drops stale responses.
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val client = TolgeeApiClient(url, apiKey)
+            val langFuture = ApplicationManager.getApplication().executeOnPooledThread(
+                Callable {
+                    runCatching {
+                        client.listProjectLanguages(projectId).map { it.tag }.filter { it.isNotBlank() }
                     }
-                    populateNamespaces(namespacesResult.getOrDefault(emptyList()), link.namespaces.toSet())
-                    populateLanguages(languagesResult.getOrDefault(emptyList()), link.languages.toSet())
-                }
+                },
+            )
+            val namespacesResult = runCatching { client.listProjectNamespaces(projectId) }
+            val languagesResult: Result<List<String>> = try {
+                langFuture.get()
+            } catch (e: ExecutionException) {
+                Result.failure(e.cause ?: e)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                Result.failure(e)
             }
+
+            ApplicationManager.getApplication().invokeLater({
+                if (myEpoch != metaEpoch) return@invokeLater
+                val errors = listOfNotNull(namespacesResult.exceptionOrNull(), languagesResult.exceptionOrNull())
+                if (errors.isNotEmpty()) {
+                    Messages.showWarningDialog(
+                        ideProject,
+                        "Failed to load project metadata:\n" +
+                            errors.joinToString("\n") { it.message ?: it.javaClass.simpleName },
+                        "Tolgee",
+                    )
+                }
+                populateNamespaces(namespacesResult.getOrDefault(emptyList()), link.namespaces.toSet())
+                populateLanguages(languagesResult.getOrDefault(emptyList()), link.languages.toSet())
+            }, ModalityState.any())
         }
-        task.queue()
     }
 
     private fun populateNamespaces(available: List<String>, previouslySelected: Set<String>) {
