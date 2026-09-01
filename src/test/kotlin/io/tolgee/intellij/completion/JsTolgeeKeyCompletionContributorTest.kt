@@ -98,7 +98,60 @@ class JsTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
     }
 
     fun testInsertHandlerAppendsJsObjectLiteralForParams() {
-        // Two keys sharing prefix, one with an ICU param and one without.
+        seedWithParamKey()
+        myFixture.configureByText("m.ts", """const s = t('greeting_n<caret>');""")
+        myFixture.completeBasic()
+        // Only one match remains → framework auto-inserts and fires the insert handler.
+        val text = myFixture.editor.document.text
+        assertTrue(
+            "expected JS object-literal tail after key, got:\n$text",
+            text.contains("t('greeting_named', { name: name })"),
+        )
+        assertEquals("name", selectedText())
+    }
+
+    fun testInsertHandlerUsesJsxParamsAttributeInsideTComponent() {
+        seedWithParamKey()
+        myFixture.configureByText(
+            "M.tsx",
+            """
+            const el = <T keyName="greeting_n<caret>" />;
+            """.trimIndent(),
+        )
+        myFixture.completeBasic()
+        val text = myFixture.editor.document.text
+        assertTrue(
+            "expected JSX params attribute after key, got:\n$text",
+            text.contains("""<T keyName="greeting_named" params={{ name: name }} />"""),
+        )
+        assertEquals("name", selectedText())
+    }
+
+    fun testInsertHandlerDoesNotEatCharactersOnNextLine() {
+        // Regression: findInsertOffset used to skip newlines and land at </a>, splicing the
+        // params tail inside the closing tag.
+        seedWithParamKey()
+        myFixture.configureByText(
+            "M.tsx",
+            """
+            const el = <a>
+                <T keyName="greeting_n<caret>" />
+            </a>;
+            """.trimIndent(),
+        )
+        myFixture.completeBasic()
+        val text = myFixture.editor.document.text
+        assertTrue(
+            "the closing </a> must remain intact, got:\n$text",
+            text.contains("</a>"),
+        )
+        assertTrue(
+            "params attribute must live inside the T tag, got:\n$text",
+            text.contains("""<T keyName="greeting_named" params={{ name: name }} />"""),
+        )
+    }
+
+    private fun seedWithParamKey() {
         val entries = listOf(
             TolgeeKeyCache.CachedKey.of(
                 TolgeeKey(
@@ -116,14 +169,7 @@ class JsTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
             ),
         )
         TolgeeKeyCache.getInstance(project).setIndexForTests(TolgeeKeyCache.Index(entries))
-
-        myFixture.configureByText("m.ts", """const s = t('greeting_n<caret>');""")
-        myFixture.completeBasic()
-        // Only one match remains → framework auto-inserts and fires the insert handler.
-        val text = myFixture.editor.document.text
-        assertTrue(
-            "expected JS object-literal tail after key, got:\n$text",
-            text.contains("t('greeting_named', { name: name })"),
-        )
     }
+
+    private fun selectedText(): String = myFixture.editor.selectionModel.selectedText.orEmpty()
 }

@@ -28,12 +28,18 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
 
         if (thisLogger().isTraceEnabled) logDiagnostics(parameters)
 
-        if (!isInsideTolgeeContext(parameters.position)) return
+        val context = tolgeeContextAt(parameters.position) ?: return
+        val style = when (context) {
+            TolgeeContext.CALL -> ParamInsertionStyle.JS_OBJECT_LITERAL
+            TolgeeContext.JSX_ATTRIBUTE -> ParamInsertionStyle.JSX_ATTRIBUTE
+        }
 
         for (entry in cache.entries) {
-            result.addElement(CompletionInsertion.lookupFor(entry, ParamInsertionStyle.JS_OBJECT_LITERAL))
+            result.addElement(CompletionInsertion.lookupFor(entry, style))
         }
     }
+
+    private enum class TolgeeContext { CALL, JSX_ATTRIBUTE }
 
     private fun logDiagnostics(parameters: CompletionParameters) {
         val pos = parameters.position
@@ -47,15 +53,15 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
             .toList()
         thisLogger().trace(
             "[Tolgee] completion fired: lang=${pos.language.id} " +
-                "matched=${isInsideTolgeeContext(pos)}\n  " +
+                "context=${tolgeeContextAt(pos)}\n  " +
                 ancestors.joinToString("\n  "),
         )
     }
 
-    private fun isInsideTolgeeContext(position: PsiElement): Boolean {
+    private fun tolgeeContextAt(position: PsiElement): TolgeeContext? {
         var p: PsiElement? = position
         repeat(15) {
-            val cur = p ?: return false
+            val cur = p ?: return null
             val rawType = cur.node?.elementType?.toString().orEmpty()
             val type = rawType.uppercase()
 
@@ -64,7 +70,7 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
             //    recurses to the leftmost leaf, which loses the qualifier (`tolgee.t` → `tolgee`).
             if (type.contains("CALL") && type.contains("EXPRESSION")) {
                 val ref = cur.firstChild
-                if (ref != null && isTolgeeCall(ref.text)) return true
+                if (ref != null && isTolgeeCall(ref.text)) return TolgeeContext.CALL
             }
 
             // 2. JSX/TSX attribute named `keyName` on a `<T>` tag.
@@ -82,13 +88,13 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
                     }
                 if (matches) {
                     val tag = enclosingJsxTag(cur)
-                    if (tag != null && jsxTagName(tag) == "T") return true
+                    if (tag != null && jsxTagName(tag) == "T") return TolgeeContext.JSX_ATTRIBUTE
                 }
             }
 
             p = cur.parent
         }
-        return false
+        return null
     }
 
     private fun enclosingJsxTag(start: PsiElement): PsiElement? {
@@ -126,6 +132,6 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
      * Strings normally don't auto-trigger completion in JetBrains IDEs.
      */
     override fun invokeAutoPopup(position: PsiElement, typeChar: Char): Boolean {
-        return isInsideTolgeeContext(position)
+        return tolgeeContextAt(position) != null
     }
 }

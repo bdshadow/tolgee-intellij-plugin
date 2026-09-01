@@ -8,20 +8,23 @@ import io.tolgee.intellij.project.TolgeeKeyCache
 
 /** Strategies for inserting parameters after the key string. */
 enum class ParamInsertionStyle {
-    /** `t('greeting', { name: <CARET> })` — JS/TS object literal. */
+    /** `t('greeting', { name: <SEL>name</SEL> })` — JS/TS function-call. */
     JS_OBJECT_LITERAL,
 
-    /** `t("greeting", mapOf("name" to <CARET>))` — Kotlin map. */
+    /** `<T keyName="greeting" params={{ name: <SEL>name</SEL> }} />` — Tolgee React `<T>` component prop. */
+    JSX_ATTRIBUTE,
+
+    /** `t("greeting", mapOf("name" to <SEL>name</SEL>))` — Kotlin map. */
     KOTLIN_MAP_OF,
 
-    /** `tolgee.translate("greeting", Map.of("name", <CARET>))` — Java Map.of. */
+    /** `tolgee.translate("greeting", Map.of("name", <SEL>name</SEL>))` — Java Map.of. */
     JAVA_MAP_OF,
 
     /** No params — just the key. */
     NONE,
 }
 
-/** Builds a completion [LookupElement] and, if the key has ICU params, appends an argument map after the key string. */
+/** Builds a completion [LookupElement] and, if the key has ICU params, appends a tail after the key string. */
 object CompletionInsertion {
 
     fun lookupFor(
@@ -44,6 +47,8 @@ object CompletionInsertion {
         return builder
     }
 
+    private data class TailInsertion(val text: String, val selectionStart: Int, val selectionEnd: Int)
+
     private class ParamInsertHandler(
         private val params: List<String>,
         private val style: ParamInsertionStyle,
@@ -54,52 +59,71 @@ object CompletionInsertion {
             val document = editor.document
             context.commitDocument()
 
-            val (rawTail, caretInTail) = renderTail(params, style) ?: return
+            val tail = renderTail(params, style) ?: return
             val insertOffset = findInsertOffset(context, context.tailOffset)
-            document.insertString(insertOffset, rawTail)
+            document.insertString(insertOffset, tail.text)
             context.commitDocument()
 
-            if (caretInTail >= 0) {
-                editor.caretModel.moveToOffset(insertOffset + caretInTail)
-            }
+            val selStart = insertOffset + tail.selectionStart
+            val selEnd = insertOffset + tail.selectionEnd
+            editor.caretModel.moveToOffset(selEnd)
+            editor.selectionModel.setSelection(selStart, selEnd)
         }
 
         /**
          * `tailOffset` sits inside the string literal (between the inserted key text and the
-         * closing quote), so first step past that quote to land in the enclosing call, then past
-         * any whitespace to sit just before the next `,` / `)`.
+         * closing quote). Step past the quote so we land immediately in the enclosing call/tag,
+         * and let each tail carry its own leading whitespace — skipping through existing spaces
+         * causes doubles (`"foo"  params`) or lands on the wrong line for unclosed tags.
          */
         private fun findInsertOffset(context: InsertionContext, tailOffset: Int): Int {
             val text = context.document.charsSequence
-            var i = tailOffset
-            if (i < text.length && (text[i] == '\'' || text[i] == '"' || text[i] == '`')) i++
-            while (i < text.length && text[i].isWhitespace()) i++
-            return i
+            val i = tailOffset
+            return if (i < text.length && (text[i] == '\'' || text[i] == '"' || text[i] == '`')) i + 1 else i
         }
 
-        /** Returns `(text, caretOffsetWithinText)` or null if there's nothing to insert. */
-        private fun renderTail(params: List<String>, style: ParamInsertionStyle): Pair<String, Int>? {
+        private fun renderTail(params: List<String>, style: ParamInsertionStyle): TailInsertion? {
             if (params.isEmpty()) return null
             val sb = StringBuilder()
-            var caretAt = -1
+            var selStart = -1
+            var selEnd = -1
+            fun markSelection(range: IntRange) {
+                if (selStart < 0) {
+                    selStart = range.first
+                    selEnd = range.last
+                }
+            }
             when (style) {
                 ParamInsertionStyle.JS_OBJECT_LITERAL -> {
                     sb.append(", { ")
                     params.forEachIndexed { idx, p ->
                         if (idx > 0) sb.append(", ")
                         sb.append(p).append(": ")
-                        if (idx == 0) caretAt = sb.length
+                        val start = sb.length
                         sb.append(p)
+                        if (idx == 0) markSelection(start..sb.length)
                     }
                     sb.append(" }")
+                }
+                ParamInsertionStyle.JSX_ATTRIBUTE -> {
+                    sb.append(" params={{ ")
+                    params.forEachIndexed { idx, p ->
+                        if (idx > 0) sb.append(", ")
+                        sb.append(p).append(": ")
+                        val start = sb.length
+                        sb.append(p)
+                        if (idx == 0) markSelection(start..sb.length)
+                    }
+                    sb.append(" }}")
                 }
                 ParamInsertionStyle.KOTLIN_MAP_OF -> {
                     sb.append(", mapOf(")
                     params.forEachIndexed { idx, p ->
                         if (idx > 0) sb.append(", ")
                         sb.append('"').append(p).append("\" to ")
-                        if (idx == 0) caretAt = sb.length
+                        val start = sb.length
                         sb.append(p)
+                        if (idx == 0) markSelection(start..sb.length)
                     }
                     sb.append(')')
                 }
@@ -108,14 +132,15 @@ object CompletionInsertion {
                     params.forEachIndexed { idx, p ->
                         if (idx > 0) sb.append(", ")
                         sb.append('"').append(p).append("\", ")
-                        if (idx == 0) caretAt = sb.length
+                        val start = sb.length
                         sb.append(p)
+                        if (idx == 0) markSelection(start..sb.length)
                     }
                     sb.append(')')
                 }
                 ParamInsertionStyle.NONE -> return null
             }
-            return sb.toString() to caretAt
+            return TailInsertion(sb.toString(), selStart, selEnd)
         }
     }
 }
