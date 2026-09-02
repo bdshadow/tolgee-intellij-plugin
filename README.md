@@ -19,9 +19,9 @@ provides:
   sites in JavaScript, TypeScript, JSX, TSX, Java, Kotlin, and Android
   `strings.xml`. When a key is parametrized (ICU MessageFormat), the plugin
   inserts a parameter argument shaped for the host language
-  (`{ name: name }` for JS, `mapOf("name" to name)` for Kotlin,
-  `Map.of("name", name)` for Java) and starts an inline live template so you
-  can tab through the placeholders.
+  (`{ name: name }` for JS, `params={{ name: name }}` for the `<T>` component,
+  `mapOf("name" to name)` for Kotlin, `Map.of("name", name)` for Java) and
+  pre-selects the first placeholder value so you can start typing immediately.
 
 ## How to
 
@@ -35,15 +35,21 @@ Open the **Tolgee** tool window (right side bar) and click **+**. Fill in:
   projects you can see. Stored in the IDE's secure password store; only the URL
   goes into `.idea/tolgee.xml`.
 - Click **Load projects**, pick one from the dropdown.
-- **Namespaces** — comma-separated list to include. Blank = all namespaces in
-  the Tolgee project.
+- **Pull translations after creating the connection** (checked by default) —
+  runs Pull immediately after saving, so code completion is ready right away.
+
+Under **Advanced**:
+
 - **Translations path** — directory under the project root that holds the
   translation files (default `.tolgee`). Created automatically on save if
   missing.
-- **Languages** — comma-separated list to push/pull. Blank = all Tolgee
-  project languages.
-- **Pull translations after creating the connection** (checked by default) —
-  runs Pull immediately after saving, so code completion is ready right away.
+- **Namespaces** — checkbox list. `<All namespaces>` (default) or pick a
+  specific subset to push/pull. When the project has 0 or 1 namespace the
+  list collapses to a single disabled row.
+- **Languages** — checkbox list. `<All languages>` (default) or pick a
+  specific subset. Widening the selection on **Edit Connection…** triggers an
+  automatic Pull; narrowing it prompts you to delete files that fall outside
+  the new filter.
 
 Editing an existing connection (right-click the tree → **Edit Connection…**)
 opens the same dialog without the pull checkbox.
@@ -89,7 +95,8 @@ populated:
 
 For parametrized keys, the plugin extracts ICU parameters from the translation
 text (and derives `count` for plurals), then inserts an argument map after the
-key string and runs an inline live template so you can tab through placeholders.
+key string and pre-selects the first placeholder value so you can start typing
+the real argument immediately.
 
 ## Reference
 

@@ -4,13 +4,73 @@
     <vendor email="bdshadow@gmail.com" url="https://github.com/bdshadow/tolgee-intellij-plugin">Dmitrii Bocharov</vendor>
 
     <description><![CDATA[
-        Tolgee localization platform integration for JetBrains IDEs.
+        <h2>Tolgee for JetBrains</h2>
+        <p>
+            Bring the <a href="https://tolgee.io">Tolgee</a> localization platform
+            into your IDE. Push, pull, and autocomplete translation keys —
+            with ICU parameter support — without leaving the editor.
+        </p>
+
+        <h3>Features</h3>
         <ul>
-            <li>Configure Tolgee instance URL and API key globally</li>
-            <li>Link the current project to a Tolgee project</li>
-            <li>Push and pull translations from Tolgee</li>
-            <li>Autocomplete translation keys with ICU parameters in JS/TS/JSX/TSX, Java, and Kotlin</li>
+            <li><b>Tool window</b> — link an IDE project to a Tolgee project,
+                browse local translation files, push/pull whole projects or
+                single files.</li>
+            <li><b>Code completion</b> — translation keys autocomplete inside
+                recognized call sites in JavaScript, TypeScript, JSX/TSX,
+                Java, Kotlin, and Android <code>strings.xml</code>.</li>
+            <li><b>ICU parameters</b> — when a key uses parameters (including
+                plurals), the plugin inserts an argument shaped for the host
+                language (<code>{ name: name }</code> in JS,
+                <code>params={{ name: name }}</code> in the
+                <code>&lt;T&gt;</code> component,
+                <code>mapOf("name" to name)</code> in Kotlin,
+                <code>Map.of("name", name)</code> in Java) and pre-selects
+                the first placeholder so you can start typing immediately.</li>
+            <li><b>Local-first cache</b> — completion reads from the on-disk
+                translation files, so it stays fast and works offline. Push
+                and Pull refresh the cache automatically.</li>
+            <li><b>Scoped push / pull</b> — right-click a namespace directory
+                or a single <code>&lt;lang&gt;.json</code> to sync just that
+                scope, or use the toolbar to sync the whole project.</li>
         </ul>
+
+        <h3>Getting started</h3>
+        <ol>
+            <li>Open the <b>Tolgee</b> tool window on the right sidebar.</li>
+            <li>Click <b>+</b>, paste your Tolgee instance URL and API key
+                (a Project API Key <code>tgpak_…</code> or a Personal Access
+                Token <code>tgpat_…</code>).</li>
+            <li>Click <b>Load projects</b>, pick one, hit <b>Add</b>. The
+                plugin pulls translations and warms the completion cache.</li>
+            <li>Start typing a key name inside <code>t('…')</code> or
+                <code>&lt;T keyName="…" /&gt;</code> — suggestions appear
+                immediately.</li>
+        </ol>
+
+        <p>
+            <img src="https://raw.githubusercontent.com/bdshadow/tolgee-intellij-plugin/main/docs/screenshots/tool-window.png"
+                 alt="Tolgee tool window showing a linked project" />
+        </p>
+        <p>
+            <img src="https://raw.githubusercontent.com/bdshadow/tolgee-intellij-plugin/main/docs/screenshots/completion.png"
+                 alt="Key completion popup with ICU parameter preview" />
+        </p>
+
+        <h3>Compatibility</h3>
+        <p>
+            Requires IntelliJ Platform 2025.1 or later. Works in IntelliJ IDEA
+            (Ultimate and Community), WebStorm, PyCharm, GoLand, RustRover,
+            RubyMine, PhpStorm, Android Studio, and other IntelliJ-based IDEs.
+            Language-specific completion loads only if the corresponding
+            language plugin is present — everything else works everywhere.
+        </p>
+
+        <h3>Source and support</h3>
+        <p>
+            <a href="https://github.com/bdshadow/tolgee-intellij-plugin">github.com/bdshadow/tolgee-intellij-plugin</a>
+            — issues, source, contributions welcome.
+        </p>
     ]]></description>
 
     <change-notes><![CDATA[
