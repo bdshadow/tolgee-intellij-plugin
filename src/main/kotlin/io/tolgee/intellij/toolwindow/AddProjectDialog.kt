@@ -61,6 +61,10 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     // Drop metadata responses from superseded loads (user clicked between projects).
     private var metaEpoch = 0
 
+    // Base language tag captured on the last successful metadata load; persisted on save
+    // so the completion popup samples translations in a predictable language.
+    private var latestBaseLanguage: String? = null
+
     private lateinit var advancedGroup: CollapsibleRow
 
     init {
@@ -173,6 +177,7 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         link.namespaces = newNamespaces.toMutableList()
         link.translationsPath = newPath
         link.languages = newLanguages.toMutableList()
+        latestBaseLanguage?.let { link.baseLanguage = it }
 
         // Materialise the directory now so the tree renders as "empty" not "missing".
         try {
@@ -295,12 +300,12 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             val langFuture = ApplicationManager.getApplication().executeOnPooledThread(
                 Callable {
                     runCatching {
-                        client.listProjectLanguages(projectId).map { it.tag }.filter { it.isNotBlank() }
+                        client.listProjectLanguages(projectId).filter { it.tag.isNotBlank() }
                     }
                 },
             )
             val namespacesResult = runCatching { client.listProjectNamespaces(projectId) }
-            val languagesResult: Result<List<String>> = try {
+            val languagesResult = try {
                 langFuture.get()
             } catch (e: ExecutionException) {
                 Result.failure(e.cause ?: e)
@@ -320,8 +325,10 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
                         "Tolgee",
                     )
                 }
+                val languages = languagesResult.getOrDefault(emptyList())
+                latestBaseLanguage = languages.firstOrNull { it.base }?.tag
                 populateNamespaces(namespacesResult.getOrDefault(emptyList()), link.namespaces.toSet())
-                populateLanguages(languagesResult.getOrDefault(emptyList()), link.languages.toSet())
+                populateLanguages(languages.map { it.tag }, link.languages.toSet())
             }, ModalityState.any())
         }
     }

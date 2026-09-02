@@ -33,13 +33,32 @@ class TolgeeKeyCache(private val project: Project) {
         val fullName: String,
     ) {
         companion object {
-            fun of(key: TolgeeKey): CachedKey = CachedKey(
+            fun of(key: TolgeeKey, preferredLanguage: String? = null): CachedKey = CachedKey(
                 key = key,
                 params = IcuParams.extractParamNames(key),
-                sample = key.translations.values.firstOrNull()?.text?.take(60)?.replace('\n', ' '),
+                sample = pickSample(key.translations, preferredLanguage),
                 fullName = if (key.keyNamespace.isNullOrBlank()) key.keyName
                 else "${key.keyNamespace}:${key.keyName}",
             )
+
+            /**
+             * Preference order for the completion popup's sample text:
+             *   1. The project's base language (as saved on the link)
+             *   2. Any English variant, so freshly-added or filter-narrowed links still
+             *      show something readable to most users
+             *   3. Whatever `firstOrNull()` returns — better than nothing
+             */
+            private fun pickSample(
+                translations: Map<String, TolgeeTranslation>,
+                preferred: String?,
+            ): String? {
+                val text = preferred?.takeIf { it.isNotBlank() }?.let { translations[it]?.text }
+                    ?: ENGLISH_FALLBACKS.firstNotNullOfOrNull { translations[it]?.text }
+                    ?: translations.values.firstOrNull()?.text
+                return text?.take(60)?.replace('\n', ' ')
+            }
+
+            private val ENGLISH_FALLBACKS = listOf("en", "en-US", "en-GB")
         }
     }
 
@@ -61,6 +80,7 @@ class TolgeeKeyCache(private val project: Project) {
             return
         }
         val translationsPath = link.translationsPath
+        val baseLanguage = link.baseLanguage.ifBlank { null }
 
         val task = object : Task.Backgroundable(project, "Refreshing Tolgee keys from files", true) {
             private var loaded: List<CachedKey> = emptyList()
@@ -75,7 +95,7 @@ class TolgeeKeyCache(private val project: Project) {
                         TranslationFiles.resolveDir(project, translationsPath)
                     }
                     loaded = if (dir == null || !dir.isDirectory) emptyList()
-                    else ReadAction.compute<List<CachedKey>, RuntimeException> { buildKeys(dir) }
+                    else ReadAction.compute<List<CachedKey>, RuntimeException> { buildKeys(dir, baseLanguage) }
                 } catch (e: Exception) {
                     err = e
                 }
@@ -101,7 +121,7 @@ class TolgeeKeyCache(private val project: Project) {
      * objects, wrapping each in a [CachedKey] with completion metadata already computed.
      * A key is flagged plural if any translation uses `{X, plural, …}`.
      */
-    private fun buildKeys(dir: VirtualFile): List<CachedKey> {
+    private fun buildKeys(dir: VirtualFile, preferredLanguage: String?): List<CachedKey> {
         val builders = linkedMapOf<Pair<String, String>, KeyBuilder>()
         var nextId = 1L
         for (lf in TranslationFiles.listAllLanguageFiles(dir)) {
@@ -128,6 +148,7 @@ class TolgeeKeyCache(private val project: Project) {
                     keyIsPlural = it.isPlural,
                     translations = it.translations.toMap(),
                 ),
+                preferredLanguage = preferredLanguage,
             )
         }
     }

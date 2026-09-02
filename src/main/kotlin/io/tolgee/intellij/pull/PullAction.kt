@@ -75,8 +75,19 @@ class PullAction : AnAction() {
                     // is unspecified (typically base + one). To honour "all languages", resolve the
                     // full project language list here and pass it explicitly.
                     val requestedLangs: List<String> = try {
-                        langFilter?.toList()
-                            ?: client.listProjectLanguages(link.tolgeeProjectId).map { it.tag }
+                        if (langFilter != null) {
+                            langFilter.toList()
+                        } else {
+                            val all = client.listProjectLanguages(link.tolgeeProjectId)
+                            // Keep the saved base language fresh — the user may have changed it on
+                            // the server since the last Add/Edit round-trip.
+                            all.firstOrNull { it.base }?.tag?.let { newBase ->
+                                if (newBase.isNotBlank() && newBase != link.baseLanguage) {
+                                    link.baseLanguage = newBase
+                                }
+                            }
+                            all.map { it.tag }
+                        }
                     } catch (e: Exception) {
                         err = e
                         return

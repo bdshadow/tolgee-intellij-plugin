@@ -26,6 +26,12 @@ class TolgeeProjectLink : PersistentStateComponent<TolgeeProjectLink.State> {
         var translationsPath: String = ".tolgee",
         /** Languages to push/pull. Empty = use Tolgee project languages. */
         var languages: MutableList<String> = mutableListOf(),
+        /**
+         * Tag of the Tolgee project's base language (`en`, `de`, …). Used to pick the
+         * sample translation shown in the completion popup. Empty = unknown; the
+         * cache falls back to English then to any available translation.
+         */
+        var baseLanguage: String = "",
     )
 
     private var state = State()
@@ -58,6 +64,10 @@ class TolgeeProjectLink : PersistentStateComponent<TolgeeProjectLink.State> {
     var languages: MutableList<String>
         get() = state.languages
         set(value) { state.languages = value }
+
+    var baseLanguage: String
+        get() = state.baseLanguage
+        set(value) { state.baseLanguage = value }
 
     fun unlink() {
         state.tolgeeProjectId = 0
