@@ -62,6 +62,57 @@ class TolgeeKeyCacheTest {
         assertNull(cached.sample)
     }
 
+    @Test
+    fun `displayEntries drops namespaced siblings when the default namespace has the same key`() {
+        val index = TolgeeKeyCache.Index(
+            listOf(
+                cachedKey(id = 1, name = "edit-button", namespace = null),
+                cachedKey(id = 2, name = "edit-button", namespace = "emails"),
+                cachedKey(id = 3, name = "edit-button", namespace = "invoices"),
+                cachedKey(id = 4, name = "other-key", namespace = "emails"),
+            ),
+        )
+        val display = index.displayEntries
+        assertEquals(2, display.size)
+        assertEquals(listOf(1L, 4L), display.map { it.key.keyId })
+    }
+
+    @Test
+    fun `displayEntries collapses accidental default-namespace duplicates to one entry`() {
+        val index = TolgeeKeyCache.Index(
+            listOf(
+                cachedKey(id = 1, name = "edit-button", namespace = null),
+                cachedKey(id = 2, name = "edit-button", namespace = null),
+            ),
+        )
+        val display = index.displayEntries
+        assertEquals(1, display.size)
+        assertEquals(1L, display.single().key.keyId)
+    }
+
+    @Test
+    fun `displayEntries keeps every namespaced sibling when no default is present`() {
+        val index = TolgeeKeyCache.Index(
+            listOf(
+                cachedKey(id = 1, name = "edit-button", namespace = "emails"),
+                cachedKey(id = 2, name = "edit-button", namespace = "invoices"),
+            ),
+        )
+        val display = index.displayEntries
+        assertEquals(2, display.size)
+        assertEquals(setOf("emails", "invoices"), display.mapNotNull { it.key.keyNamespace }.toSet())
+    }
+
+    private fun cachedKey(id: Long, name: String, namespace: String?): TolgeeKeyCache.CachedKey =
+        TolgeeKeyCache.CachedKey.of(
+            TolgeeKey(
+                keyId = id,
+                keyName = name,
+                keyNamespace = namespace,
+                translations = mapOf("en" to TolgeeTranslation(text = "sample")),
+            ),
+        )
+
     private fun keyWithTranslations(vararg entries: Pair<String, String>): TolgeeKey =
         TolgeeKey(
             keyId = 1,

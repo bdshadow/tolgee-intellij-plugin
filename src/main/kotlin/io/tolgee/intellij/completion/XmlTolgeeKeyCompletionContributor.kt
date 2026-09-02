@@ -25,10 +25,14 @@ class XmlTolgeeKeyCompletionContributor : CompletionContributor() {
         if (cache.entries.isEmpty()) return
         if (!isInsideStringNameAttribute(parameters.position)) return
 
-        for (entry in cache.entries) {
+        for (entry in cache.displayEntries) {
             result.addElement(CompletionInsertion.lookupFor(entry, ParamInsertionStyle.NONE))
         }
     }
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun invokeAutoPopup(position: PsiElement, typeChar: Char): Boolean =
+        isInsideStringNameAttribute(position)
 
     private fun isInsideStringNameAttribute(position: PsiElement): Boolean {
         val value = PsiTreeUtil.getParentOfType(position, XmlAttributeValue::class.java) ?: return false

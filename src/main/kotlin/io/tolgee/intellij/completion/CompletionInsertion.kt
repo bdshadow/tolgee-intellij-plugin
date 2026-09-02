@@ -34,9 +34,13 @@ object CompletionInsertion {
         val key = cached.key
         val params = cached.params
 
+        val namespace = key.keyNamespace?.takeIf { it.isNotBlank() }
+        val paramsText = if (params.isEmpty()) "" else " · {${params.joinToString(", ")}}"
+        val typeText = "Tolgee" + (namespace?.let { " · $it" }.orEmpty()) + paramsText
+
         var builder = LookupElementBuilder.create(key, key.keyName)
             .withPresentableText(key.keyName)
-            .withTypeText(if (params.isEmpty()) "Tolgee" else "Tolgee · {${params.joinToString(", ")}}", true)
+            .withTypeText(typeText, true)
             .withTailText(cached.sample?.let { " — $it" }, true)
             .withLookupString(cached.fullName)
 
@@ -64,20 +68,21 @@ object CompletionInsertion {
             document.insertString(insertOffset, tail.text)
             context.commitDocument()
 
-            // If the JSX tag isn't closed after our insertion (bare `<T keyName="foo"` with no
-            // `/>` yet), self-close it so the user isn't left staring at a syntax error.
             if (style == ParamInsertionStyle.JSX_ATTRIBUTE) {
-                val afterTail = insertOffset + tail.text.length
-                if (tagNeedsSelfClose(document.charsSequence, afterTail)) {
-                    document.insertString(afterTail, " />")
-                    context.commitDocument()
-                }
+                selfCloseJsxTagIfNeeded(context, insertOffset + tail.text.length)
             }
 
             val selStart = insertOffset + tail.selectionStart
             val selEnd = insertOffset + tail.selectionEnd
             editor.caretModel.moveToOffset(selEnd)
             editor.selectionModel.setSelection(selStart, selEnd)
+        }
+
+        private fun selfCloseJsxTagIfNeeded(context: InsertionContext, afterTail: Int) {
+            val document = context.document
+            if (!tagNeedsSelfClose(document.charsSequence, afterTail)) return
+            document.insertString(afterTail, " />")
+            context.commitDocument()
         }
 
         private fun tagNeedsSelfClose(text: CharSequence, at: Int): Boolean {

@@ -67,7 +67,6 @@ class XmlTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
     }
 
     fun testDoesNotCompleteWhenCacheEmpty() {
-        // Cache stays empty (default).
         myFixture.configureByText(
             "strings.xml",
             """

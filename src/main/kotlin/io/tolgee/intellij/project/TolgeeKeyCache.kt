@@ -62,7 +62,28 @@ class TolgeeKeyCache(private val project: Project) {
         }
     }
 
-    data class Index(val entries: List<CachedKey> = emptyList())
+    data class Index(val entries: List<CachedKey> = emptyList()) {
+        /**
+         * The subset of [entries] that completion popups should show. Same-name keys are
+         * deduplicated per this rule:
+         *   - if the key exists in the default (unnamed) namespace, it wins and every
+         *     namespaced sibling with the same [TolgeeKey.keyName] is dropped;
+         *   - otherwise every namespaced entry is kept so the user can pick which
+         *     namespace they meant — the namespace itself is surfaced in the popup
+         *     by [CompletionInsertion.lookupFor].
+         */
+        val displayEntries: List<CachedKey> by lazy {
+            entries.groupBy { it.key.keyName }.flatMap { (_, siblings) ->
+                // First hit in the default namespace wins outright — if the cache ever
+                // holds two "default" entries for the same name (shouldn't happen from
+                // buildKeys, but keeps the invariant that user-visible duplicates cannot
+                // sneak in), only one shows up.
+                val defaultWinner = siblings.firstOrNull { it.key.keyNamespace.isNullOrBlank() }
+                if (defaultWinner != null) listOf(defaultWinner)
+                else siblings
+            }
+        }
+    }
 
     private val ref = AtomicReference(Index())
 
@@ -123,6 +144,7 @@ class TolgeeKeyCache(private val project: Project) {
      */
     private fun buildKeys(dir: VirtualFile, preferredLanguage: String?): List<CachedKey> {
         val builders = linkedMapOf<Pair<String, String>, KeyBuilder>()
+        val warnedNoisyNames = mutableSetOf<String>()
         var nextId = 1L
         for (lf in TranslationFiles.listAllLanguageFiles(dir)) {
             val flat = try {
@@ -130,7 +152,19 @@ class TolgeeKeyCache(private val project: Project) {
             } catch (_: Exception) {
                 continue
             }
-            for ((keyName, valueEl) in flat) {
+            for ((rawKeyName, valueEl) in flat) {
+                // Server-side data can end up with stray whitespace / newlines in the key
+                // itself (e.g. "edit-button\n   "). That would otherwise appear as a second
+                // row in the completion popup that looks identical to the clean one. Match
+                // on the trimmed form so users pick the key that matches their source code.
+                val keyName = rawKeyName.trim()
+                if (keyName.isEmpty()) continue
+                if (keyName != rawKeyName && warnedNoisyNames.add(rawKeyName)) {
+                    thisLogger().warn(
+                        "Tolgee key has surrounding whitespace in ${lf.file.path}: " +
+                            "${rawKeyName.take(60).replace("\n", "\\n")} — trimmed for completion.",
+                    )
+                }
                 val text = (valueEl as? JsonPrimitive)?.let { if (it.isString) it.content else null } ?: continue
                 val b = builders.getOrPut(lf.namespace.orEmpty() to keyName) {
                     KeyBuilder(nextId++, keyName, lf.namespace)

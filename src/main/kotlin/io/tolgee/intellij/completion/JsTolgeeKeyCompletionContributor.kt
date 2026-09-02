@@ -34,7 +34,7 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
             TolgeeContext.JSX_ATTRIBUTE -> ParamInsertionStyle.JSX_ATTRIBUTE
         }
 
-        for (entry in cache.entries) {
+        for (entry in cache.displayEntries) {
             result.addElement(CompletionInsertion.lookupFor(entry, style))
         }
     }

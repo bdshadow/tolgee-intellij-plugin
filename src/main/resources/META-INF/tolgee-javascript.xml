@@ -1,16 +1,16 @@
 <idea-plugin>
     <extensions defaultExtensionNs="com.intellij">
+        <!--
+          One registration only. The `language` attribute is matched via
+          Language.isKindOf(), which respects inheritance — TypeScript /
+          JSX Harmony / TypeScript JSX all derive from JavaScript, so this
+          single line dispatches for all four dialects. Registering each
+          dialect separately makes the contributor fire multiple times for
+          the same position in TSX files, producing duplicate suggestions
+          in the completion popup.
+        -->
         <completion.contributor
                 language="JavaScript"
-                implementationClass="io.tolgee.intellij.completion.JsTolgeeKeyCompletionContributor"/>
-        <completion.contributor
-                language="TypeScript"
-                implementationClass="io.tolgee.intellij.completion.JsTolgeeKeyCompletionContributor"/>
-        <completion.contributor
-                language="JSX Harmony"
-                implementationClass="io.tolgee.intellij.completion.JsTolgeeKeyCompletionContributor"/>
-        <completion.contributor
-                language="TypeScript JSX"
                 implementationClass="io.tolgee.intellij.completion.JsTolgeeKeyCompletionContributor"/>
     </extensions>
 </idea-plugin>

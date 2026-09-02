@@ -18,14 +18,17 @@ class KotlinTolgeeKeyCompletionContributor : CompletionContributor() {
         if (cache.entries.isEmpty()) return
         if (!isInsideTolgeeCallStringArg(parameters.position)) return
 
-        for (entry in cache.entries) {
+        for (entry in cache.displayEntries) {
             result.addElement(CompletionInsertion.lookupFor(entry, ParamInsertionStyle.KOTLIN_MAP_OF))
         }
     }
 
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun invokeAutoPopup(position: PsiElement, typeChar: Char): Boolean =
+        isInsideTolgeeCallStringArg(position)
+
     private fun isInsideTolgeeCallStringArg(position: PsiElement): Boolean {
         val literal = PsiTreeUtil.getParentOfType(position, KtStringTemplateExpression::class.java) ?: return false
-        // The call expression is two parents up: literal -> argument -> argument list -> call.
         val call = PsiTreeUtil.getParentOfType(literal, KtCallExpression::class.java) ?: return false
         val firstArg = call.valueArguments.firstOrNull()?.getArgumentExpression() ?: return false
         if (firstArg !== literal) return false
