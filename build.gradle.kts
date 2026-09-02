@@ -76,10 +76,12 @@ intellijPlatform {
         id = "io.tolgee.intellij"
         name = "Tolgee"
         version = project.version.toString()
-        description = "Tolgee localization platform integration: link projects, push/pull translations, and autocomplete translation keys."
+        // description and <change-notes> live in src/main/resources/META-INF/plugin.xml
+        // so the CDATA HTML stays authored in one place.
         vendor {
-            name = "Tolgee"
-            url = "https://tolgee.io"
+            name = "Dmitrii Bocharov"
+            email = "bdshadow@gmail.com"
+            url = "https://github.com/bdshadow/tolgee-intellij-plugin"
         }
         ideaVersion {
             sinceBuild = "251"

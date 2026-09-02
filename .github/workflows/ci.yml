@@ -29,6 +29,9 @@ jobs:
       - name: Build & test
         run: ./gradlew --no-daemon build test
 
+      - name: Verify plugin (JetBrains Marketplace approval check)
+        run: ./gradlew --no-daemon verifyPlugin
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
@@ -37,4 +40,12 @@ jobs:
           path: |
             build/reports/tests/test
             build/test-results/test
+          if-no-files-found: ignore
+
+      - name: Upload plugin verifier report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-verifier-report
+          path: build/reports/pluginVerifier
           if-no-files-found: ignore

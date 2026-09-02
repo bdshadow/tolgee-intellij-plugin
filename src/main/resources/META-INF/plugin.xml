@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>io.tolgee.intellij</id>
     <name>Tolgee</name>
-    <vendor email="info@tolgee.io" url="https://tolgee.io">Tolgee</vendor>
+    <vendor email="bdshadow@gmail.com" url="https://github.com/bdshadow/tolgee-intellij-plugin">Dmitrii Bocharov</vendor>
 
     <description><![CDATA[
         Tolgee localization platform integration for JetBrains IDEs.
@@ -12,6 +12,13 @@
             <li>Autocomplete translation keys with ICU parameters in JS/TS/JSX/TSX, Java, and Kotlin</li>
         </ul>
     ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>0.1.0</h3>
+        <ul>
+            <li>Initial release.</li>
+        </ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends optional="true" config-file="tolgee-javascript.xml">JavaScript</depends>
