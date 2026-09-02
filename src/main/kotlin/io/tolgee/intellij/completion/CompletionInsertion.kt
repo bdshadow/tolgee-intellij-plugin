@@ -64,10 +64,28 @@ object CompletionInsertion {
             document.insertString(insertOffset, tail.text)
             context.commitDocument()
 
+            // If the JSX tag isn't closed after our insertion (bare `<T keyName="foo"` with no
+            // `/>` yet), self-close it so the user isn't left staring at a syntax error.
+            if (style == ParamInsertionStyle.JSX_ATTRIBUTE) {
+                val afterTail = insertOffset + tail.text.length
+                if (tagNeedsSelfClose(document.charsSequence, afterTail)) {
+                    document.insertString(afterTail, " />")
+                    context.commitDocument()
+                }
+            }
+
             val selStart = insertOffset + tail.selectionStart
             val selEnd = insertOffset + tail.selectionEnd
             editor.caretModel.moveToOffset(selEnd)
             editor.selectionModel.setSelection(selStart, selEnd)
+        }
+
+        private fun tagNeedsSelfClose(text: CharSequence, at: Int): Boolean {
+            var i = at
+            while (i < text.length && (text[i] == ' ' || text[i] == '\t')) i++
+            if (i >= text.length) return true
+            val c = text[i]
+            return c != '/' && c != '>'
         }
 
         /**

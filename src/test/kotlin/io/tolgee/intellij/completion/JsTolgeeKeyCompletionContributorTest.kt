@@ -127,6 +127,25 @@ class JsTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
         assertEquals("name", selectedText())
     }
 
+    fun testInsertHandlerAutoClosesUnclosedTag() {
+        seedWithParamKey()
+        // Tag is missing `/>` — the user was typing when they invoked completion.
+        myFixture.configureByText(
+            "M.tsx",
+            """
+            const el = <a>
+                <T keyName="greeting_n<caret>"
+            </a>;
+            """.trimIndent(),
+        )
+        myFixture.completeBasic()
+        val text = myFixture.editor.document.text
+        assertTrue(
+            "expected auto-closed <T /> after params, got:\n$text",
+            text.contains("""<T keyName="greeting_named" params={{ name: name }} />"""),
+        )
+    }
+
     fun testInsertHandlerDoesNotEatCharactersOnNextLine() {
         // Regression: findInsertOffset used to skip newlines and land at </a>, splicing the
         // params tail inside the closing tag.
