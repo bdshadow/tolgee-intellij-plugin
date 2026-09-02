@@ -44,6 +44,11 @@
         <completion.contributor
                 language="XML"
                 implementationClass="io.tolgee.intellij.completion.XmlTolgeeKeyCompletionContributor"/>
+
+        <!-- Warm the key cache on project open so completion works before the user
+             manually clicks "Refresh Tolgee Keys". -->
+        <postStartupActivity
+                implementation="io.tolgee.intellij.project.TolgeeCacheStartupActivity"/>
     </extensions>
 
     <actions>
