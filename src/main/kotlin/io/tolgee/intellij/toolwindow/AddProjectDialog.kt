@@ -103,11 +103,11 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             cell(projectCombo).resizableColumn().align(AlignX.FILL)
             cell(refreshProjectsButton)
         }
-        row("Translations path:") { cell(pathField).resizableColumn().align(AlignX.FILL) }
         if (isCreation) {
             row { cell(autoPullCheckbox) }
         }
         advancedGroup = collapsibleGroup("Advanced") {
+            row("Translations path:") { cell(pathField).resizableColumn().align(AlignX.FILL) }
             row("Namespaces:") {
                 cell(JBScrollPane(namespacesList).apply { preferredSize = JBDimension(320, 120) })
                     .resizableColumn().align(AlignX.FILL)
