@@ -39,7 +39,9 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     private val link = TolgeeProjectLink.getInstance(ideProject)
 
     private val urlField = JBTextField(settings.instanceUrl.ifBlank { "https://app.tolgee.io" })
-    private val apiKeyField = JBPasswordField().apply { text = settings.apiKey }
+    // Populated asynchronously — see init { … }. Reading from PasswordSafe is a slow
+    // op and must not run on the EDT.
+    private val apiKeyField = JBPasswordField()
     private val projectCombo = ComboBox<TolgeeProject>().apply { renderer = TolgeeProjectListRenderer() }
     private val refreshProjectsButton = JButton("Load projects")
     private val pathField = JBTextField(link.translationsPath.ifBlank { ".tolgee" })
@@ -80,6 +82,7 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         }
         installExclusiveAllListener(namespacesList, ALL_NAMESPACES)
         installExclusiveAllListener(languagesList, ALL_LANGUAGES)
+        loadApiKeyIntoFieldAsync()
         init()
         if (link.isLinked) {
             // Show current selection as a stub so OK is enabled without reloading.
@@ -171,7 +174,13 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         }
 
         settings.instanceUrl = urlField.text.trim()
-        settings.apiKey = String(apiKeyField.password)
+        // PasswordSafe.set is also a slow op — push it off the EDT. The plugin needs
+        // the key persisted before the auto-pull triggered below runs, so we block on
+        // the pooled thread's completion via .get().
+        val newKey = String(apiKeyField.password)
+        ApplicationManager.getApplication()
+            .executeOnPooledThread { settings.apiKey = newKey }
+            .get()
         link.tolgeeProjectId = selected.id
         link.tolgeeProjectName = selected.name
         link.namespaces = newNamespaces.toMutableList()
@@ -283,6 +292,21 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             }
         }
         task.queue()
+    }
+
+    private fun loadApiKeyIntoFieldAsync() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val key = settings.apiKey
+            if (key.isEmpty()) return@executeOnPooledThread
+            ApplicationManager.getApplication().invokeLater(
+                {
+                    // Only fill if the user hasn't started typing something else in the
+                    // meantime — respect their input if the load races with a keystroke.
+                    if (apiKeyField.password.isEmpty()) apiKeyField.text = key
+                },
+                ModalityState.any(),
+            )
+        }
     }
 
     private fun loadProjectMeta(projectId: Long) {

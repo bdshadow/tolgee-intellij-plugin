@@ -58,6 +58,27 @@ class TolgeeToolWindowPanel(private val project: Project) {
     private val emptyLabel = JBLabel("No Tolgee project linked. Click + to add one.").apply {
         border = JBUI.Borders.empty(12)
     }
+
+    /**
+     * Shown when the link is present but the API key isn't (fresh install after upgrade,
+     * user cleared the OS keychain, keychain access denied). Toolbar actions all depend
+     * on isConfigured, so without this fallback the user has no reachable way to
+     * reopen the Add/Edit dialog.
+     */
+    private fun buildReconnectPanel(): JComponent {
+        val label = JBLabel("Tolgee API key not available. Reopen the connection dialog to re-enter it.")
+        val button = javax.swing.JButton("Edit Connection…").apply {
+            addActionListener { AddProjectDialog(project).show() }
+        }
+        return JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(12)
+            add(label, BorderLayout.NORTH)
+            add(
+                JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 8)).apply { add(button) },
+                BorderLayout.CENTER,
+            )
+        }
+    }
     // The toolbar's actions read e.project via CommonDataKeys.PROJECT from the
     // DataContext derived from targetComponent. Without an explicit provider on
     // our panel, IntelliJ (and Android Studio, in particular) can end up with
@@ -157,8 +178,11 @@ class TolgeeToolWindowPanel(private val project: Project) {
     fun rebuild() {
         container.removeAll()
         val link = TolgeeProjectLink.getInstance(project)
-        if (!TolgeeAppSettings.getInstance().isConfigured || !link.isLinked) {
+        val configured = TolgeeAppSettings.getInstance().isConfigured
+        if (!link.isLinked) {
             container.add(emptyLabel, BorderLayout.NORTH)
+        } else if (!configured) {
+            container.add(buildReconnectPanel(), BorderLayout.NORTH)
         } else {
             root.userObject = NodeData(link.tolgeeProjectName, TolgeeIcons.TOOL_WINDOW)
             root.removeAllChildren()
