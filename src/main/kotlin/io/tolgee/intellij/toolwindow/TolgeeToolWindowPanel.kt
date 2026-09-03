@@ -6,6 +6,8 @@ import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataProvider
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
@@ -56,7 +58,15 @@ class TolgeeToolWindowPanel(private val project: Project) {
     private val emptyLabel = JBLabel("No Tolgee project linked. Click + to add one.").apply {
         border = JBUI.Borders.empty(12)
     }
-    private val container = JPanel(BorderLayout())
+    // The toolbar's actions read e.project via CommonDataKeys.PROJECT from the
+    // DataContext derived from targetComponent. Without an explicit provider on
+    // our panel, IntelliJ (and Android Studio, in particular) can end up with
+    // e.project == null in AnAction.update — which leaves the "+" button
+    // permanently disabled and the whole toolbar looking dead.
+    private val container = object : JPanel(BorderLayout()), DataProvider {
+        override fun getData(dataId: String): Any? =
+            if (CommonDataKeys.PROJECT.`is`(dataId)) project else null
+    }
 
     val component: JComponent get() = container
 
