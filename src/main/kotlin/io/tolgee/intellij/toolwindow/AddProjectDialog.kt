@@ -173,26 +173,39 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             }
         }
 
-        settings.instanceUrl = urlField.text.trim()
-        // PasswordSafe.set is also a slow op — push it off the EDT. The plugin needs
-        // the key persisted before the auto-pull triggered below runs, so we block on
-        // the pooled thread's completion via .get().
+        val newUrl = urlField.text.trim()
         val newKey = String(apiKeyField.password)
-        ApplicationManager.getApplication()
-            .executeOnPooledThread { settings.apiKey = newKey }
-            .get()
-        link.tolgeeProjectId = selected.id
-        link.tolgeeProjectName = selected.name
-        link.namespaces = newNamespaces.toMutableList()
-        link.translationsPath = newPath
-        link.languages = newLanguages.toMutableList()
-        latestBaseLanguage?.let { link.baseLanguage = it }
+        val newBaseLanguage = latestBaseLanguage
 
-        // Materialise the directory now so the tree renders as "empty" not "missing".
-        try {
-            TranslationFiles.ensureDir(ideProject, link.translationsPath)
-        } catch (_: Exception) {
-            // Pull/push will surface the error later if it still matters.
+        // Save the entire link atomically inside a modal task: writing the API key
+        // to PasswordSafe is a slow op, and we must not leave the app-level URL
+        // updated while the link fields are stale (or vice versa) if PasswordSafe
+        // throws. On failure we surface a real error and keep the dialog open so
+        // the user can retry — do NOT call super.doOKAction and do NOT fire Pull.
+        val saveError: Throwable? = runSaveTask {
+            settings.apiKey = newKey
+            settings.instanceUrl = newUrl
+            link.tolgeeProjectId = selected.id
+            link.tolgeeProjectName = selected.name
+            link.namespaces = newNamespaces.toMutableList()
+            link.translationsPath = newPath
+            link.languages = newLanguages.toMutableList()
+            newBaseLanguage?.let { link.baseLanguage = it }
+            // Materialise the directory so the tree renders "empty" not "missing".
+            // Failures here are non-fatal — Pull/Push will surface any real issue.
+            try {
+                TranslationFiles.ensureDir(ideProject, link.translationsPath)
+            } catch (_: Exception) {
+                // best effort
+            }
+        }
+        if (saveError != null) {
+            Messages.showErrorDialog(
+                ideProject,
+                "Couldn't save the Tolgee connection:\n${saveError.message ?: saveError.javaClass.simpleName}",
+                "Tolgee",
+            )
+            return
         }
 
         super.doOKAction()
@@ -204,6 +217,27 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         } else {
             TolgeeKeyCache.getInstance(ideProject).refreshAsync()
         }
+    }
+
+    /**
+     * Runs [work] on a background thread inside a modal progress, so PasswordSafe
+     * writes and other slow ops don't block the EDT. Returns null on success or the
+     * captured throwable on failure.
+     */
+    private fun runSaveTask(work: () -> Unit): Throwable? {
+        var err: Throwable? = null
+        val task = object : Task.Modal(ideProject, "Saving Tolgee connection", false) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                try {
+                    work()
+                } catch (t: Throwable) {
+                    err = t
+                }
+            }
+        }
+        task.queue()
+        return err
     }
 
     /**
