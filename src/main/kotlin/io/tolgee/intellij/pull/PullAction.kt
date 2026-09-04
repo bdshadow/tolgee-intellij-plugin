@@ -111,9 +111,23 @@ class PullAction : AnAction() {
                         return
                     }
 
+                    val skippedNamespaces = mutableSetOf<String>()
                     val buckets = linkedMapOf<Pair<String, String>, MutableMap<String, JsonElement>>()
                     for (key in filtered) {
-                        val ns = key.keyNamespace.orEmpty()
+                        val rawNs = key.keyNamespace.orEmpty()
+                        // Server-controlled — must be safe as a single filesystem segment
+                        // before we use it as a directory name. Reject `foo/bar`, `..`,
+                        // NUL, Windows reserved names, etc.
+                        val ns: String? = when {
+                            rawNs.isEmpty() -> ""
+                            else -> TranslationFiles.safeRelativePath(rawNs)?.takeIf { !it.contains('/') }
+                        }
+                        if (ns == null) {
+                            if (skippedNamespaces.add(rawNs)) {
+                                log.warn("Skipping keys in unsafe Tolgee namespace: '$rawNs'")
+                            }
+                            continue
+                        }
                         for ((lang, tr) in key.translations) {
                             if (langFilter != null && lang !in langFilter) continue
                             val text = tr.text ?: continue
