@@ -63,6 +63,21 @@ class IcuParamsTest {
     }
 
     @Test
+    fun `literal apostrophe does not swallow following placeholder`() {
+        assertEquals(listOf("name"), extract("Don't forget {name}"))
+    }
+
+    @Test
+    fun `apostrophe followed by syntax char still starts a quoted section`() {
+        assertEquals(emptyList<String>(), extract("Use '{curly}' braces"))
+    }
+
+    @Test
+    fun `multiple literal apostrophes surrounded by real placeholders`() {
+        assertEquals(listOf("name", "verb"), extract("Don't {verb} it, {name}."))
+    }
+
+    @Test
     fun `nested selects and plurals`() {
         val text = "{gender, select, male {He liked {count, plural, one {# post} other {# posts}}} " +
             "female {She liked {count, plural, one {# post} other {# posts}}} " +

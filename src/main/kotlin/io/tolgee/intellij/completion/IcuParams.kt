@@ -35,8 +35,7 @@ object IcuParams {
         val len = message.length
         while (i < len) {
             val c = message[i]
-            if (c == '\'' && i + 1 < len) {
-                // ICU apostrophe escaping. Skip until matching quote (or doubled).
+            if (c == '\'' && startsIcuQuote(message, i)) {
                 i = skipQuoted(message, i)
                 continue
             }
@@ -52,17 +51,15 @@ object IcuParams {
     }
 
     private fun parsePlaceholder(inner: String, out: MutableSet<String>) {
-        // First chunk before a comma at depth 0 is the parameter name.
         val name = takeNameUntilComma(inner)
         if (name.isNotBlank() && isValidName(name)) out += name
 
-        // Recurse into sub-messages (between '{' and matching '}' at depth 0)
         var depth = 0
         var i = 0
         var subStart = -1
         while (i < inner.length) {
             val c = inner[i]
-            if (c == '\'' && i + 1 < inner.length) {
+            if (c == '\'' && startsIcuQuote(inner, i)) {
                 i = skipQuoted(inner, i); continue
             }
             when (c) {
@@ -87,7 +84,7 @@ object IcuParams {
         var depth = 0
         while (i < s.length) {
             val c = s[i]
-            if (c == '\'' && i + 1 < s.length) { i = skipQuoted(s, i); continue }
+            if (c == '\'' && startsIcuQuote(s, i)) { i = skipQuoted(s, i); continue }
             when (c) {
                 '{' -> depth++
                 '}' -> depth--
@@ -103,7 +100,7 @@ object IcuParams {
         var i = openIdx
         while (i < s.length) {
             val c = s[i]
-            if (c == '\'' && i + 1 < s.length) { i = skipQuoted(s, i); continue }
+            if (c == '\'' && startsIcuQuote(s, i)) { i = skipQuoted(s, i); continue }
             when (c) {
                 '{' -> depth++
                 '}' -> { depth--; if (depth == 0) return i }
@@ -113,9 +110,19 @@ object IcuParams {
         return -1
     }
 
+    /**
+     * ICU MessageFormat rule: a single `'` starts a quoted section only if it's
+     * immediately followed by an ICU syntax character (`{`, `}`, `|`, `#`) or by
+     * another `'` (which encodes a literal apostrophe). Everywhere else a lone
+     * `'` is just a literal apostrophe — vital for English text like "Don't
+     * forget {name}", where the apostrophe must not swallow the placeholder.
+     */
+    private fun startsIcuQuote(s: String, at: Int): Boolean {
+        val next = s.getOrNull(at + 1) ?: return false
+        return next == '\'' || next == '{' || next == '}' || next == '|' || next == '#'
+    }
+
     private fun skipQuoted(s: String, startQuote: Int): Int {
-        // ICU: a single `'` starts a quoted section that ends at the next `'`.
-        // `''` is a literal apostrophe (no quoting effect).
         if (startQuote + 1 < s.length && s[startQuote + 1] == '\'') return startQuote + 2
         var i = startQuote + 1
         while (i < s.length) {
