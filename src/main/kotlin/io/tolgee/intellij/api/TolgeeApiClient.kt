@@ -28,9 +28,15 @@ import java.util.concurrent.TimeUnit
  * project. Both use the `X-Api-Key` header.
  */
 class TolgeeApiClient(
-    private val baseUrl: String,
+    baseUrl: String,
     private val apiKey: String,
 ) {
+    // Validated + normalised at construction. Any misconfigured URL is caught here
+    // with a message the UI can surface, rather than crashing later inside `request()`
+    // with a raw kotlin/okhttp IllegalArgumentException, or worse — sending the API
+    // key in cleartext to an untrusted host because plain `http://` slipped through.
+    private val baseUrl: String = validateAndNormaliseBaseUrl(baseUrl)
+
     private val http: OkHttpClient = sharedHttp
 
     private val json = Json {
@@ -225,7 +231,60 @@ class TolgeeApiClient(
         }
     }
 
-    private companion object {
+    companion object {
+        /**
+         * Normalises the user-entered Tolgee instance URL and rejects anything that
+         * would either crash later inside okhttp or exfiltrate the API key over an
+         * insecure channel.
+         *
+         *  - Trims and drops trailing slashes.
+         *  - If the scheme is missing (`app.tolgee.io`), assumes `https://`.
+         *  - Rejects any scheme other than `http` / `https`.
+         *  - Rejects `http://` unless the host is a loopback / on-machine host
+         *    (`localhost`, `127.x.x.x`, `[::1]`, or a `.local` name), so the API
+         *    key can't be sent in cleartext to arbitrary internet hosts even when
+         *    the URL is set by a committed `.idea/tolgee.xml`.
+         *
+         * @throws IllegalArgumentException with a message suitable for surfacing in
+         *   the UI when the URL is not usable.
+         */
+        fun validateAndNormaliseBaseUrl(input: String): String {
+            val raw = input.trim()
+            require(raw.isNotEmpty()) { "Tolgee instance URL is required." }
+            // Detect the scheme up front — okhttp only understands http/https and
+            // would throw an opaque IAE for anything else. We want a clear message
+            // that names the offending scheme.
+            val scheme = Regex("^([A-Za-z][A-Za-z0-9+.-]*)://")
+                .find(raw)?.groupValues?.get(1)?.lowercase()
+            if (scheme != null && scheme != "http" && scheme != "https") {
+                throw IllegalArgumentException(
+                    "Tolgee instance URL must use http or https (got '$scheme://').",
+                )
+            }
+            val withScheme = if (scheme != null) raw else "https://$raw"
+            val url = try {
+                withScheme.toHttpUrl()
+            } catch (_: IllegalArgumentException) {
+                throw IllegalArgumentException("Not a valid Tolgee instance URL: '$input'")
+            }
+            if (url.scheme == "http" && !isLoopbackHost(url.host)) {
+                throw IllegalArgumentException(
+                    "Refusing to send the API key over cleartext http:// to a non-loopback host " +
+                        "('${url.host}'). Use https:// for public Tolgee instances.",
+                )
+            }
+            // Strip trailing '/' so callers can splice paths onto it directly.
+            return withScheme.trimEnd('/')
+        }
+
+        private fun isLoopbackHost(host: String): Boolean {
+            val h = host.lowercase()
+            return h == "localhost" ||
+                h == "::1" ||
+                h.endsWith(".local") ||
+                h.matches(Regex("""^127(?:\.\d{1,3}){3}$"""))
+        }
+
         val log = Logger.getInstance(TolgeeApiClient::class.java)
 
         // Shared across TolgeeApiClient instances so we reuse connection/thread pools instead of
