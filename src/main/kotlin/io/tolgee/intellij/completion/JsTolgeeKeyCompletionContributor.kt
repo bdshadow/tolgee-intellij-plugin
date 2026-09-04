@@ -117,20 +117,23 @@ class JsTolgeeKeyCompletionContributor : CompletionContributor() {
     private fun jsxTagName(tag: PsiElement): String? =
         Regex("""<\s*([A-Za-z_][A-Za-z0-9_.]*)""").find(tag.text)?.groupValues?.get(1)
 
+    // JS-only method surface: the Tolgee React/JS SDK exposes `t` and `translate`.
+    // Java/Kotlin sibling contributors match a wider set (`getTranslation`, `getMessage`)
+    // because the JVM SDK ships those too.
     private fun isTolgeeCall(refText: String?): Boolean {
         val cleaned = refText?.trim().orEmpty()
         if (cleaned.isEmpty()) return false
         return cleaned == "t" ||
             cleaned == "translate" ||
             cleaned.endsWith(".t") ||
-            cleaned.endsWith(".translate") ||
-            cleaned.matches(Regex(""".*\.t\b.*"""))
+            cleaned.endsWith(".translate")
     }
 
     /**
      * Auto-pop the completion popup as the user types inside a Tolgee context.
      * Strings normally don't auto-trigger completion in JetBrains IDEs.
      */
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun invokeAutoPopup(position: PsiElement, typeChar: Char): Boolean {
         return tolgeeContextAt(position) != null
     }

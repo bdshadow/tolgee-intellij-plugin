@@ -49,6 +49,14 @@ class JsTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
         assertFalse("shouldn't offer Tolgee keys in unrelated calls, got $lookups", "greeting" in lookups)
     }
 
+    fun testDoesNotCompleteInsideUnrelatedDotTChain() {
+        seedCache(project, "greeting", "grocery", "farewell")
+        myFixture.configureByText("m.ts", """router.t.push('gr<caret>');""")
+        myFixture.completeBasic()
+        val lookups = myFixture.lookupElementStrings ?: emptyList()
+        assertFalse("shouldn't offer Tolgee keys inside router.t.push chains, got $lookups", "greeting" in lookups)
+    }
+
     fun testCompletesInsideJsxKeyNameAttribute() {
         seedCache(project, "greeting", "grocery", "farewell")
         myFixture.configureByText(
@@ -147,8 +155,6 @@ class JsTolgeeKeyCompletionContributorTest : BasePlatformTestCase() {
     }
 
     fun testInsertHandlerDoesNotEatCharactersOnNextLine() {
-        // Regression: findInsertOffset used to skip newlines and land at </a>, splicing the
-        // params tail inside the closing tag.
         seedWithParamKey()
         myFixture.configureByText(
             "M.tsx",
