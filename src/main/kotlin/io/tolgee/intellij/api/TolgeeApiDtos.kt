@@ -2,7 +2,6 @@ package io.tolgee.intellij.api
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class TolgeeProject(
@@ -97,22 +96,8 @@ data class NamespacesEmbedded(
 )
 
 @Serializable
-data class WhoamiResponse(
-    val id: Long? = null,
-    val username: String? = null,
-    val name: String? = null,
-)
-
-@Serializable
 data class ApiKeyInfo(
     val id: Long? = null,
     val projectId: Long? = null,
     val scopes: List<String> = emptyList(),
 )
-
-/**
- * A flat translations map exported from Tolgee. Tolgee returns nested JSON when
- * `structureDelimiter=.` (default). We pass `structureDelimiter=` (empty) to get
- * a flat map of fully-qualified key -> translation string.
- */
-typealias FlatTranslations = Map<String, JsonElement>
