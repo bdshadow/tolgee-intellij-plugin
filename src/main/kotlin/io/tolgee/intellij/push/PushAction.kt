@@ -1,7 +1,5 @@
 package io.tolgee.intellij.push
 
-import com.intellij.notification.NotificationGroupManager
-import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -15,8 +13,11 @@ import com.intellij.openapi.ui.Messages
 import io.tolgee.intellij.api.TolgeeApiClient
 import io.tolgee.intellij.project.TolgeeKeyCache
 import io.tolgee.intellij.project.TolgeeProjectLink
+import io.tolgee.intellij.project.isTolgeeReady
 import io.tolgee.intellij.project.requireConfiguredLink
 import io.tolgee.intellij.settings.TolgeeAppSettings
+import io.tolgee.intellij.util.TolgeeFilterMath
+import io.tolgee.intellij.util.TolgeeNotifications
 import io.tolgee.intellij.util.TranslationFiles
 import java.nio.file.Files
 import java.nio.file.Paths
@@ -24,9 +25,7 @@ import java.nio.file.Paths
 class PushAction : AnAction() {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
     override fun update(e: AnActionEvent) {
-        val project = e.project
-        val link = project?.let { TolgeeProjectLink.getInstance(it) }
-        e.presentation.isEnabled = project != null && link?.isLinked == true && TolgeeAppSettings.getInstance().isConfigured
+        e.presentation.isEnabled = isTolgeeReady(e.project)
     }
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
@@ -70,10 +69,14 @@ class PushAction : AnAction() {
                 return
             }
 
+            val previewLimit = 15
+            val fileLabels = files.map(TolgeeFilterMath::labelFor)
+            val preview = fileLabels.take(previewLimit).joinToString("\n") { "  • $it" }
+            val tail = if (fileLabels.size > previewLimit) "\n  … and ${fileLabels.size - previewLimit} more" else ""
             val confirm = Messages.showYesNoDialog(
                 project,
-                "Push ${files.size} translation file(s) to Tolgee project '${link.tolgeeProjectName}'?\n" +
-                    "Existing translations will be overwritten.",
+                "Push ${files.size} translation file(s) to Tolgee project '${link.tolgeeProjectName}'? " +
+                    "Existing translations will be overwritten.\n\n$preview$tail",
                 "Push to Tolgee",
                 Messages.getQuestionIcon(),
             )
@@ -85,6 +88,7 @@ class PushAction : AnAction() {
 
             val task = object : Task.Backgroundable(project, "Pushing translations to Tolgee", true) {
                 private var pushed = 0
+                private val silentDrops = mutableListOf<String>()
                 private var err: Throwable? = null
                 private var startedAt = 0L
 
@@ -101,14 +105,15 @@ class PushAction : AnAction() {
                             // Read straight from disk: VirtualFile.contentsToByteArray caches, and can
                             // serve stale bytes when the file was written outside IntelliJ.
                             val bytes = Files.readAllBytes(Paths.get(lf.file.path))
-                            client.importFlatJson(
+                            val acknowledged = client.importFlatJson(
                                 projectId = link.tolgeeProjectId,
                                 languageTag = lf.language,
                                 flatJsonBytes = bytes,
                                 namespace = lf.namespace,
                                 overrideExisting = true,
                             )
-                            pushed++
+                            if (acknowledged) pushed++
+                            else silentDrops += TolgeeFilterMath.labelFor(lf)
                         } catch (e: Exception) {
                             err = e
                             return
@@ -122,19 +127,24 @@ class PushAction : AnAction() {
                     if (err != null) {
                         log.warn("Push failed after ${ms}ms (pushed=$pushed): ${err!!.message}", err)
                     } else {
-                        log.info("Push done: $pushed file(s) in ${ms}ms")
+                        log.info("Push done: $pushed file(s), ${silentDrops.size} silently dropped, in ${ms}ms")
                     }
                     ApplicationManager.getApplication().invokeLater {
                         if (err != null) {
                             Messages.showErrorDialog(project, err!!.message ?: "Push failed", "Tolgee")
+                        } else if (silentDrops.isNotEmpty()) {
+                            TolgeeNotifications.warn(
+                                project,
+                                "Pushed $pushed file(s). ${silentDrops.size} file(s) were silently dropped by the Tolgee server " +
+                                    "(likely a missing API key scope or unknown language): ${silentDrops.joinToString(", ")}. " +
+                                    "See idea.log for the response bodies.",
+                            )
                         } else {
-                            NotificationGroupManager.getInstance()
-                                .getNotificationGroup("Tolgee")
-                                .createNotification("Pushed $pushed file(s) to Tolgee.", NotificationType.INFORMATION)
-                                .notify(project)
+                            TolgeeNotifications.info(project, "Pushed $pushed file(s) to Tolgee.")
                         }
                     }
                 }
+
             }
             task.queue()
         }
