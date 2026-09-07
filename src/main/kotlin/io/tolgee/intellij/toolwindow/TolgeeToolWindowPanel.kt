@@ -25,9 +25,11 @@ import io.tolgee.intellij.settings.TolgeeAppSettings
 import io.tolgee.intellij.util.TolgeeIcons
 import io.tolgee.intellij.util.TranslationFiles
 import java.awt.BorderLayout
+import java.awt.FlowLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.Icon
+import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JScrollPane
@@ -59,31 +61,11 @@ class TolgeeToolWindowPanel(private val project: Project) {
         border = JBUI.Borders.empty(12)
     }
 
-    /**
-     * Shown when the link is present but the API key isn't (fresh install after upgrade,
-     * user cleared the OS keychain, keychain access denied). Toolbar actions all depend
-     * on isConfigured, so without this fallback the user has no reachable way to
-     * reopen the Add/Edit dialog.
-     */
-    private fun buildReconnectPanel(): JComponent {
-        val label = JBLabel("Tolgee API key not available. Reopen the connection dialog to re-enter it.")
-        val button = javax.swing.JButton("Edit Connection…").apply {
-            addActionListener { AddProjectDialog(project).show() }
-        }
-        return JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.empty(12)
-            add(label, BorderLayout.NORTH)
-            add(
-                JPanel(java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 8)).apply { add(button) },
-                BorderLayout.CENTER,
-            )
-        }
-    }
     // The toolbar's actions read e.project via CommonDataKeys.PROJECT from the
     // DataContext derived from targetComponent. Without an explicit provider on
     // our panel, IntelliJ (and Android Studio, in particular) can end up with
-    // e.project == null in AnAction.update — which leaves the "+" button
-    // permanently disabled and the whole toolbar looking dead.
+    // e.project == null in AnAction.update — the "+" button ends up permanently
+    // disabled and the whole toolbar looks dead.
     private val container = object : JPanel(BorderLayout()), DataProvider {
         override fun getData(dataId: String): Any? =
             if (CommonDataKeys.PROJECT.`is`(dataId)) project else null
@@ -94,7 +76,10 @@ class TolgeeToolWindowPanel(private val project: Project) {
     init {
         installContextMenu()
         rebuild()
-        TolgeeProjectLink.getInstance(project).addChangeListener { rebuild() }
+        project.messageBus.connect(project).subscribe(
+            TolgeeProjectLink.TOPIC,
+            TolgeeProjectLink.Listener { rebuild() },
+        )
     }
 
     private fun installContextMenu() {
@@ -110,15 +95,6 @@ class TolgeeToolWindowPanel(private val project: Project) {
         })
     }
 
-    /**
-     * Right-click menu built per-node:
-     *   root            → Edit Connection… ・ Push / Pull / Refresh (all)
-     *   namespace dir   → Push / Pull (just that namespace)
-     *   language file   → Push / Pull (just that ns+lang pair)
-     *
-     * Refresh only shows on the root because it's a full rescan either way, and
-     * duplicating it on every file/folder is noise.
-     */
     private fun buildContextMenu(node: DefaultMutableTreeNode): DefaultActionGroup? {
         val group = DefaultActionGroup()
         val am = ActionManager.getInstance()
@@ -165,8 +141,6 @@ class TolgeeToolWindowPanel(private val project: Project) {
             override fun actionPerformed(e: AnActionEvent) = PullAction.runFor(project, ns, lang)
         }
 
-    // Refresh reads local files into the cache. Since the cache is holistic and
-    // parsing is cheap, we always do a full rescan regardless of scope.
     private fun refreshAction(): AnAction =
         object : AnAction("Refresh", null, AllIcons.Actions.Refresh) {
             override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
@@ -198,6 +172,22 @@ class TolgeeToolWindowPanel(private val project: Project) {
         }
         container.revalidate()
         container.repaint()
+    }
+
+    // Shown by rebuild() when the link is present but the API key isn't (fresh
+    // install after upgrade, OS keychain cleared, keychain access denied). Toolbar
+    // actions all depend on isConfigured, so without this fallback the user has no
+    // reachable way to reopen the Add/Edit dialog.
+    private fun buildReconnectPanel(): JComponent {
+        val label = JBLabel("Tolgee API key not available. Reopen the connection dialog to re-enter it.")
+        val button = JButton("Edit Connection…").apply {
+            addActionListener { AddProjectDialog(project).show() }
+        }
+        return JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(12)
+            add(label, BorderLayout.NORTH)
+            add(JPanel(FlowLayout(FlowLayout.LEFT, 0, 8)).apply { add(button) }, BorderLayout.CENTER)
+        }
     }
 
     private fun addChildren(node: DefaultMutableTreeNode, vf: VirtualFile) {
