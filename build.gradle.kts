@@ -50,23 +50,26 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 
-// Extra run task: `./gradlew runIdeAndroidStudio` launches the plugin sandbox
-// against a local Android Studio install. Default `runIde` still uses the
-// IntelliJ IDEA Ultimate defined in the `dependencies { intellijPlatform { ... } }`
-// block so JS/TS completion keeps compiling.
-intellijPlatformTesting {
-    runIde.register("runIdeAndroidStudio") {
-        val studioContents = "/Users/bdshadow/Applications/Android Studio.app/Contents"
-        localPath.set(file(studioContents))
-        task {
-            // Android Studio's studio.vmoptions sets
-            //   -Djava.nio.file.spi.DefaultFileSystemProvider=com.intellij.platform.core.nio.fs.MultiRoutingFileSystemProvider
-            // and the launcher normally prepends nio-fs.jar to the boot classpath so the
-            // JVM can resolve that SPI at boot. Gradle's runIde doesn't replicate that for
-            // a localPath IDE, so JFR init crashes with ClassNotFoundException. Boot with
-            // Studio's own JBR and add nio-fs.jar to the boot classpath.
-            executable = "$studioContents/jbr/Contents/Home/bin/java"
-            jvmArgs("-Xbootclasspath/a:$studioContents/lib/nio-fs.jar")
+// Extra run task: `./gradlew -PandroidStudioPath=… runIdeAndroidStudio` launches
+// the plugin sandbox against a local Android Studio install. Only registered when
+// the property is provided so a fresh clone doesn't fail on someone else's absent
+// path. Set `androidStudioPath` in `~/.gradle/gradle.properties` or on the command
+// line — e.g. `-PandroidStudioPath=/Users/you/Applications/Android Studio.app/Contents`.
+val androidStudioPath: String? = findProperty("androidStudioPath") as String?
+if (androidStudioPath != null) {
+    intellijPlatformTesting {
+        runIde.register("runIdeAndroidStudio") {
+            localPath.set(file(androidStudioPath))
+            task {
+                // Android Studio's studio.vmoptions sets
+                //   -Djava.nio.file.spi.DefaultFileSystemProvider=com.intellij.platform.core.nio.fs.MultiRoutingFileSystemProvider
+                // and the launcher normally prepends nio-fs.jar to the boot classpath so the
+                // JVM can resolve that SPI at boot. Gradle's runIde doesn't replicate that for
+                // a localPath IDE, so JFR init crashes with ClassNotFoundException. Boot with
+                // Studio's own JBR and add nio-fs.jar to the boot classpath.
+                executable = "$androidStudioPath/jbr/Contents/Home/bin/java"
+                jvmArgs("-Xbootclasspath/a:$androidStudioPath/lib/nio-fs.jar")
+            }
         }
     }
 }
@@ -126,5 +129,14 @@ tasks {
     // it's purely an optimization for the settings dialog. Skipping it.
     buildSearchableOptions {
         enabled = false
+    }
+
+    // Apache-2.0 §4(a) requires the plugin ZIP itself carry the license text and
+    // per-dependency attribution — the GitHub-side LICENSE doesn't reach users
+    // downloading the compiled bundle from Marketplace. Land both files at the top
+    // of the plugin directory inside the ZIP.
+    prepareSandbox {
+        from(rootDir.resolve("LICENSE")) { into(intellijPlatform.projectName) }
+        from(rootDir.resolve("THIRD-PARTY-NOTICES.md")) { into(intellijPlatform.projectName) }
     }
 }
