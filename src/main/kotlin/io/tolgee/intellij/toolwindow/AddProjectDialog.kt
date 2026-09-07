@@ -25,6 +25,7 @@ import io.tolgee.intellij.project.TolgeeKeyCache
 import io.tolgee.intellij.project.TolgeeProjectLink
 import io.tolgee.intellij.pull.PullAction
 import io.tolgee.intellij.settings.TolgeeAppSettings
+import io.tolgee.intellij.util.TolgeeFilterMath
 import io.tolgee.intellij.util.TranslationFiles
 import java.awt.event.ItemEvent
 import java.util.concurrent.Callable
@@ -39,8 +40,6 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     private val link = TolgeeProjectLink.getInstance(ideProject)
 
     private val urlField = JBTextField(settings.instanceUrl.ifBlank { "https://app.tolgee.io" })
-    // Populated asynchronously — see init { … }. Reading from PasswordSafe is a slow
-    // op and must not run on the EDT.
     private val apiKeyField = JBPasswordField()
     private val projectCombo = ComboBox<TolgeeProject>().apply { renderer = TolgeeProjectListRenderer() }
     private val refreshProjectsButton = JButton("Load projects")
@@ -57,14 +56,11 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         setStringItems(linkedMapOf(ALL_LANGUAGES to true))
     }
 
-    // Guards CheckBoxList listeners from re-entering during programmatic updates.
     private var suppressListListeners = false
 
     // Drop metadata responses from superseded loads (user clicked between projects).
     private var metaEpoch = 0
 
-    // Base language tag captured on the last successful metadata load; persisted on save
-    // so the completion popup samples translations in a predictable language.
     private var latestBaseLanguage: String? = null
 
     private lateinit var advancedGroup: CollapsibleRow
@@ -82,7 +78,10 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         }
         installExclusiveAllListener(namespacesList, ALL_NAMESPACES)
         installExclusiveAllListener(languagesList, ALL_LANGUAGES)
-        loadApiKeyIntoFieldAsync()
+        // Prefill the stored key only in Edit mode. For a new connection start
+        // with an empty field — the app-scoped save from a prior project shouldn't
+        // read as "we already know your key here."
+        if (link.isLinked) loadApiKeyIntoFieldAsync()
         init()
         if (link.isLinked) {
             // Show current selection as a stub so OK is enabled without reloading.
@@ -132,7 +131,14 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         if (urlField.text.isBlank()) return ValidationInfo("Instance URL is required", urlField)
         if (apiKeyField.password.isEmpty()) return ValidationInfo("API key is required", apiKeyField)
         if (projectCombo.selectedItem == null) return ValidationInfo("Load and select a Tolgee project", projectCombo)
-        if (pathField.text.isBlank()) return ValidationInfo("Translations path is required", pathField)
+        val pathText = pathField.text.trim()
+        if (pathText.isEmpty()) return ValidationInfo("Translations path is required", pathField)
+        if (TranslationFiles.safeRelativePath(pathText) == null) {
+            return ValidationInfo(
+                "Translations path must be a relative path under the project — no absolute paths, no '..', no Windows-reserved names.",
+                pathField,
+            )
+        }
         return null
     }
 
@@ -144,34 +150,11 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
 
         // Snapshot pre-mutation filters so we can detect widening after `link.*` is reassigned.
         val filterWidened = !isCreation && (
-            filterWasWidened(link.languages, newLanguages) ||
-                filterWasWidened(link.namespaces, newNamespaces)
+            TolgeeFilterMath.filterWasWidened(link.languages, newLanguages) ||
+                TolgeeFilterMath.filterWasWidened(link.namespaces, newNamespaces)
             )
 
-        // If the user narrowed the filter in Edit, offer to remove local files that are no longer
-        // covered by the default (toolbar) scope. Right-click Push/Pull still works per file, so
-        // this is opt-in cleanup, not a functional requirement.
-        if (!isCreation && newPath == link.translationsPath) {
-            val orphaned = filesNoLongerCovered(newPath, newLanguages, newNamespaces)
-            if (orphaned.isNotEmpty()) {
-                val listing = orphaned.joinToString("\n") { "  • ${labelFor(it)}" }
-                val choice = Messages.showYesNoCancelDialog(
-                    ideProject,
-                    "These files are no longer covered by the language/namespace filter:\n\n$listing\n\n" +
-                        "Delete them from disk?",
-                    "Tolgee",
-                    "Delete",
-                    "Keep",
-                    Messages.getCancelButton(),
-                    Messages.getQuestionIcon(),
-                )
-                when (choice) {
-                    Messages.YES -> deleteOrphaned(orphaned)
-                    Messages.NO -> Unit
-                    else -> return // Cancel — keep dialog open.
-                }
-            }
-        }
+        if (!confirmOrphanCleanup(newPath, newLanguages, newNamespaces)) return
 
         val newUrl = urlField.text.trim()
         val newKey = String(apiKeyField.password)
@@ -192,11 +175,9 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
             link.languages = newLanguages.toMutableList()
             newBaseLanguage?.let { link.baseLanguage = it }
             // Materialise the directory so the tree renders "empty" not "missing".
-            // Failures here are non-fatal — Pull/Push will surface any real issue.
             try {
                 TranslationFiles.ensureDir(ideProject, link.translationsPath)
             } catch (_: Exception) {
-                // best effort
             }
         }
         if (saveError != null) {
@@ -212,7 +193,6 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
         link.fireChanged()
         val autoPull = (isCreation && autoPullCheckbox.isSelected) || filterWidened
         if (autoPull) {
-            // Pull refreshes the cache itself, so no extra call here.
             PullAction.runFor(ideProject)
         } else {
             TolgeeKeyCache.getInstance(ideProject).refreshAsync()
@@ -241,19 +221,36 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     }
 
     /**
-     * True when the new selection covers something the old one didn't. Empty list means "all",
-     * so `[] → [a, b]` isn't widening (still a subset of "all"), whereas `[a] → []` widens to all.
+     * If the user narrowed the filter in Edit and there are local files that fall outside
+     * it, prompt Delete / Keep / Cancel. Returns `false` iff the user picked Cancel — the
+     * caller should abort the save so the dialog stays open.
      */
-    private fun filterWasWidened(old: List<String>, new: List<String>): Boolean = when {
-        old.isEmpty() -> false
-        new.isEmpty() -> true
-        else -> !old.toSet().containsAll(new)
+    private fun confirmOrphanCleanup(
+        newPath: String,
+        newLanguages: List<String>,
+        newNamespaces: List<String>,
+    ): Boolean {
+        if (isCreation || newPath != link.translationsPath) return true
+        val orphaned = filesNoLongerCovered(newPath, newLanguages, newNamespaces)
+        if (orphaned.isEmpty()) return true
+        val listing = orphaned.joinToString("\n") { "  • ${TolgeeFilterMath.labelFor(it)}" }
+        val choice = Messages.showYesNoCancelDialog(
+            ideProject,
+            "These files are no longer covered by the language/namespace filter:\n\n$listing\n\n" +
+                "Delete them from disk?",
+            "Tolgee",
+            "Delete",
+            "Keep",
+            Messages.getCancelButton(),
+            Messages.getQuestionIcon(),
+        )
+        return when (choice) {
+            Messages.YES -> { deleteOrphaned(orphaned); true }
+            Messages.NO -> true
+            else -> false
+        }
     }
 
-    /**
-     * Local files whose namespace or language is not covered by the new filter. An empty filter
-     * means "all", so nothing is orphaned in that direction.
-     */
     private fun filesNoLongerCovered(
         newPath: String,
         newLanguages: List<String>,
@@ -261,17 +258,12 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     ): List<TranslationFiles.LanguageFile> {
         val dir = TranslationFiles.resolveDir(ideProject, newPath) ?: return emptyList()
         if (!dir.isDirectory) return emptyList()
-        val langSet = newLanguages.toSet()
-        val nsSet = newNamespaces.toSet()
-        return TranslationFiles.listAllLanguageFiles(dir).filter { lf ->
-            val langOut = langSet.isNotEmpty() && lf.language !in langSet
-            val nsOut = nsSet.isNotEmpty() && (lf.namespace ?: "") !in nsSet
-            langOut || nsOut
-        }
+        return TolgeeFilterMath.filesNoLongerCovered(
+            TranslationFiles.listAllLanguageFiles(dir),
+            newLanguages,
+            newNamespaces,
+        )
     }
-
-    private fun labelFor(lf: TranslationFiles.LanguageFile): String =
-        if (lf.namespace == null) "${lf.language}.json" else "${lf.namespace}/${lf.language}.json"
 
     private fun deleteOrphaned(files: List<TranslationFiles.LanguageFile>) {
         WriteAction.runAndWait<RuntimeException> {
@@ -392,7 +384,6 @@ class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProje
     }
 
     private fun populateNamespaces(available: List<String>, previouslySelected: Set<String>) {
-        // Present the default (unnamed) namespace as a labelled row; store it as "" on save.
         val labels = available.map { if (it.isEmpty()) DEFAULT_NAMESPACE else it }
         if (renderCollapsedIfTrivial(namespacesList, labels)) return
         val previousLabels = previouslySelected.mapTo(mutableSetOf()) {
