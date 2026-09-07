@@ -1,5 +1,10 @@
 # Tolgee IntelliJ Plugin
 
+> **Community-maintained by a Tolgee core contributor.** Not (yet) part of the
+> official Tolgee product family — support and bug reports go through this
+> repository, not through Tolgee's channels. "Tolgee" is a trademark of
+> Tolgee s.r.o.
+
 Tolgee localization platform integration for JetBrains IDEs (IntelliJ IDEA,
 WebStorm, PyCharm, GoLand, RustRover, RubyMine, PhpStorm, Android Studio, etc.).
 

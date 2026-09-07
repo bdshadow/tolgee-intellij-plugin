@@ -6,6 +6,12 @@
     <description><![CDATA[
         <h2>Tolgee for JetBrains</h2>
         <p>
+            <em>Community-maintained by a Tolgee core contributor. Not (yet) part
+            of the official Tolgee product family — support and bug reports go
+            through the plugin's GitHub repository, not through Tolgee's channels.
+            "Tolgee" is a trademark of Tolgee s.r.o.</em>
+        </p>
+        <p>
             Bring the <a href="https://tolgee.io">Tolgee</a> localization platform
             into your IDE. Push, pull, and autocomplete translation keys —
             with ICU parameter support — without leaving the editor.
@@ -86,18 +92,15 @@
     <depends optional="true" config-file="tolgee-kotlin.xml">org.jetbrains.kotlin</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <!-- Application-level Tolgee connection settings (URL + API key) -->
         <applicationService
                 serviceImplementation="io.tolgee.intellij.settings.TolgeeAppSettings"/>
 
-        <!-- Project-level link to a Tolgee project + cached key index -->
         <projectService
                 serviceImplementation="io.tolgee.intellij.project.TolgeeProjectLink"/>
 
         <projectService
                 serviceImplementation="io.tolgee.intellij.project.TolgeeKeyCache"/>
 
-        <!-- Tool Window -->
         <toolWindow
                 id="Tolgee"
                 anchor="right"
@@ -106,14 +109,10 @@
 
         <notificationGroup id="Tolgee" displayType="BALLOON"/>
 
-        <!-- Android-style strings.xml completion. XML PSI is part of the platform,
-             so no optional depends is needed. -->
         <completion.contributor
                 language="XML"
                 implementationClass="io.tolgee.intellij.completion.XmlTolgeeKeyCompletionContributor"/>
 
-        <!-- Warm the key cache on project open so completion works before the user
-             manually clicks "Refresh Tolgee Keys". -->
         <postStartupActivity
                 implementation="io.tolgee.intellij.project.TolgeeCacheStartupActivity"/>
     </extensions>
