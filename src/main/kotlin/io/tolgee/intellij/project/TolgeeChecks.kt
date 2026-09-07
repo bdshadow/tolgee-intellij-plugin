@@ -20,3 +20,9 @@ fun requireConfiguredLink(project: Project): TolgeeProjectLink? {
     }
     return link
 }
+
+/** EDT-safe predicate for AnAction.update — both link and settings must be present. */
+fun isTolgeeReady(project: Project?): Boolean {
+    if (project == null) return false
+    return TolgeeProjectLink.getInstance(project).isLinked && TolgeeAppSettings.getInstance().isConfigured
+}
