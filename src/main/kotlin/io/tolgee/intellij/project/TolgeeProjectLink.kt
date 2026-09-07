@@ -5,6 +5,7 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.project.Project
+import com.intellij.util.messages.Topic
 import com.intellij.util.xmlb.XmlSerializerUtil
 
 /**
@@ -15,7 +16,7 @@ import com.intellij.util.xmlb.XmlSerializerUtil
     storages = [Storage("tolgee.xml")],
 )
 @Service(Service.Level.PROJECT)
-class TolgeeProjectLink : PersistentStateComponent<TolgeeProjectLink.State> {
+class TolgeeProjectLink(private val project: Project) : PersistentStateComponent<TolgeeProjectLink.State> {
 
     data class State(
         var tolgeeProjectId: Long = 0,
@@ -69,22 +70,32 @@ class TolgeeProjectLink : PersistentStateComponent<TolgeeProjectLink.State> {
         get() = state.baseLanguage
         set(value) { state.baseLanguage = value }
 
+    /**
+     * Clears every piece of link state — not just the project id — so an Edit
+     * dialog opened after Unlink doesn't pre-populate namespace/language filters
+     * or a base language from the previously-linked project (they wouldn't apply
+     * to a different Tolgee project anyway).
+     */
     fun unlink() {
         state.tolgeeProjectId = 0
         state.tolgeeProjectName = ""
-    }
-
-    private val changeListeners = mutableListOf<() -> Unit>()
-
-    fun addChangeListener(listener: () -> Unit) {
-        changeListeners.add(listener)
+        state.namespaces = mutableListOf()
+        state.languages = mutableListOf()
+        state.baseLanguage = ""
     }
 
     fun fireChanged() {
-        changeListeners.forEach { it() }
+        project.messageBus.syncPublisher(TOPIC).linkChanged()
+    }
+
+    fun interface Listener {
+        fun linkChanged()
     }
 
     companion object {
+        @Topic.ProjectLevel
+        val TOPIC: Topic<Listener> = Topic.create("Tolgee project link changed", Listener::class.java)
+
         fun getInstance(project: Project): TolgeeProjectLink =
             project.getService(TolgeeProjectLink::class.java)
     }
