@@ -6,7 +6,6 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -51,9 +50,14 @@ class TolgeeApiClientTest {
     }
 
     @Test
-    fun `currentApiKeyProjectId swallows non-2xx and returns null`() {
+    fun `currentApiKeyProjectId surfaces non-2xx as TolgeeApiException`() {
         server.enqueue(MockResponse().setResponseCode(403))
-        assertNull(client.currentApiKeyProjectId())
+        try {
+            client.currentApiKeyProjectId()
+            fail("expected TolgeeApiException")
+        } catch (e: TolgeeApiException) {
+            assertEquals(403, e.statusCode)
+        }
     }
 
     @Test
@@ -113,9 +117,7 @@ class TolgeeApiClientTest {
     }
 
     @Test
-    fun `listAllKeys sends languages query param when provided`() {
-        // Pull relies on this: without an explicit list the server defaults to a subset,
-        // which is why we resolve the full language set client-side and pass it here.
+    fun `listAllKeys sends explicit languages so pull does not fall back to server-default subset`() {
         server.enqueue(
             jsonResponse(
                 """{"_embedded":{"keys":[]},
@@ -225,6 +227,20 @@ class TolgeeApiClientTest {
         client.importFlatJson(12, "en", "{}".toByteArray(), namespace = null)
         val body = server.takeRequest().body.readUtf8()
         assertTrue("namespace key should not appear", !body.contains("\"namespace\""))
+    }
+
+    @Test
+    fun `importFlatJson returns true when the server responds with a body`() {
+        server.enqueue(jsonResponse("""{"summary": "ok"}"""))
+        val acknowledged = client.importFlatJson(12, "en", "{}".toByteArray())
+        assertTrue(acknowledged)
+    }
+
+    @Test
+    fun `importFlatJson returns false when the server responds with an empty body`() {
+        server.enqueue(MockResponse().setResponseCode(200))
+        val acknowledged = client.importFlatJson(12, "en", "{}".toByteArray())
+        assertFalse(acknowledged)
     }
 
     @Test

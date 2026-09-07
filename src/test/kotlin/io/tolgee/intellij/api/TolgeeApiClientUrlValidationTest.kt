@@ -42,11 +42,10 @@ class TolgeeApiClientUrlValidationTest {
         )
     }
 
-    @Test fun `accepts http for a mDNS local host`() {
-        assertEquals(
-            "http://tolgee.local",
-            TolgeeApiClient.validateAndNormaliseBaseUrl("http://tolgee.local"),
-        )
+    @Test fun `rejects http for a mDNS local host - anyone on the LAN can claim it`() {
+        assertMessageContains("cleartext http") {
+            TolgeeApiClient.validateAndNormaliseBaseUrl("http://tolgee.local")
+        }
     }
 
     @Test fun `rejects http for a public host`() {

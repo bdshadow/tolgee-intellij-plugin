@@ -16,7 +16,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
@@ -31,10 +30,6 @@ class TolgeeApiClient(
     baseUrl: String,
     private val apiKey: String,
 ) {
-    // Validated + normalised at construction. Any misconfigured URL is caught here
-    // with a message the UI can surface, rather than crashing later inside `request()`
-    // with a raw kotlin/okhttp IllegalArgumentException, or worse — sending the API
-    // key in cleartext to an untrusted host because plain `http://` slipped through.
     private val baseUrl: String = validateAndNormaliseBaseUrl(baseUrl)
 
     private val http: OkHttpClient = sharedHttp
@@ -45,59 +40,16 @@ class TolgeeApiClient(
         coerceInputValues = true
     }
 
-    private fun request(path: String, query: Map<String, String> = emptyMap()): Request.Builder {
-        val urlBuilder = "${baseUrl.trimEnd('/')}$path".toHttpUrl().newBuilder()
-        for ((k, v) in query) urlBuilder.addQueryParameter(k, v)
-        return Request.Builder()
-            .url(urlBuilder.build())
-            .header("X-Api-Key", apiKey)
-            .header("Accept", "application/json")
-            .header("User-Agent", userAgent)
-            .header("X-Tolgee-Client", "intellij-plugin")
-            .header("X-Tolgee-Client-Version", pluginVersion)
-    }
-
-    private fun execute(req: Request): Response {
-        // The API key sits in the `X-Api-Key` header of `req` — never let it into a log line.
-        val started = System.nanoTime()
-        val resp = try {
-            http.newCall(req).execute()
-        } catch (e: IOException) {
-            val ms = (System.nanoTime() - started) / 1_000_000
-            log.warn("Tolgee ${req.method} ${req.url.encodedPath} failed after ${ms}ms: ${e.message}")
-            throw e
+    /**
+     * Project id this API key is bound to, or null for an unbound key (PAT — Personal
+     * Access Token). Propagates network / API errors so callers can distinguish
+     * "server confirmed this key spans all projects" (`null`) from "the request
+     * failed" (thrown exception).
+     */
+    fun currentApiKeyProjectId(): Long? =
+        execute(request("/v2/api-keys/current").get().build()).use { resp ->
+            json.decodeFromString<ApiKeyInfo>(resp.body!!.string()).projectId
         }
-        val ms = (System.nanoTime() - started) / 1_000_000
-        if (!resp.isSuccessful) {
-            val body = resp.body?.string().orEmpty()
-            resp.close()
-            log.warn("Tolgee ${req.method} ${req.url.encodedPath} -> ${resp.code} in ${ms}ms: ${body.take(200)}")
-            throw TolgeeApiException(resp.code, "Tolgee API ${resp.code}: ${body.take(500)}")
-        }
-        if (log.isDebugEnabled) {
-            log.debug("Tolgee ${req.method} ${req.url.encodedPath} -> ${resp.code} in ${ms}ms")
-        }
-        return resp
-    }
-
-    private inline fun <reified T> get(path: String, query: Map<String, String> = emptyMap()): T {
-        execute(request(path, query).get().build()).use { resp ->
-            return json.decodeFromString(resp.body!!.string())
-        }
-    }
-
-    /** Project id this API key is bound to, or null for unbound keys (PAT). */
-    fun currentApiKeyProjectId(): Long? {
-        return try {
-            execute(request("/v2/api-keys/current").get().build()).use { resp ->
-                json.decodeFromString<ApiKeyInfo>(resp.body!!.string()).projectId
-            }
-        } catch (_: TolgeeApiException) {
-            null
-        } catch (_: IOException) {
-            null
-        }
-    }
 
     fun listProjects(): List<TolgeeProject> {
         val collected = mutableListOf<TolgeeProject>()
@@ -151,7 +103,7 @@ class TolgeeApiClient(
         return collected
     }
 
-    /** Paged fetch of every key with all translations. Used by Pull. */
+    /** Paged fetch of every key with all translations. */
     fun listAllKeys(projectId: Long, languages: List<String> = emptyList()): List<TolgeeKey> {
         val collected = mutableListOf<TolgeeKey>()
         var page = 0
@@ -168,8 +120,14 @@ class TolgeeApiClient(
     }
 
     /**
-     * Push one language file via `single-step-import`. `OVERRIDE` clobbers
-     * existing translations and `createNewKeys=true` accepts brand-new keys.
+     * Push one language file via `single-step-import`. `OVERRIDE` clobbers existing
+     * translations and `createNewKeys=true` accepts brand-new keys.
+     *
+     * @return `true` if the server response looked like an actual import summary
+     *   (non-empty body). `false` when the server accepted with a 200 but returned
+     *   nothing — Tolgee sometimes silently drops an import (e.g. unknown language,
+     *   missing scope), so callers should surface `false` as a per-file warning
+     *   rather than count the file as pushed.
      */
     fun importFlatJson(
         projectId: Long,
@@ -177,7 +135,7 @@ class TolgeeApiClient(
         flatJsonBytes: ByteArray,
         namespace: String? = null,
         overrideExisting: Boolean = true,
-    ) {
+    ): Boolean {
         val params = buildJsonObject {
             put("forceMode", JsonPrimitive(if (overrideExisting) "OVERRIDE" else "KEEP"))
             put("createNewKeys", JsonPrimitive(true))
@@ -216,34 +174,68 @@ class TolgeeApiClient(
             .build()
 
         val req = request("/v2/projects/$projectId/single-step-import")
-            .post(multipart as RequestBody)
+            .post(multipart)
             .build()
-        execute(req).use { resp ->
-            // `single-step-import` returns 200 even when the server accepts but silently drops the
-            // import (e.g., unknown language, missing scope). Surface whatever body it did return so
-            // silent no-ops show up at INFO level, not just DEBUG.
+        return execute(req).use { resp ->
             val body = resp.body?.string().orEmpty().trim()
             if (body.isNotEmpty()) {
                 log.info("Import response for project=$projectId, lang=$languageTag: ${body.take(500)}")
+                true
             } else {
-                log.info("Import response for project=$projectId, lang=$languageTag: <empty body>")
+                log.warn("Import response for project=$projectId, lang=$languageTag: <empty body>")
+                false
             }
         }
     }
 
+    private inline fun <reified T> get(path: String, query: Map<String, String> = emptyMap()): T {
+        execute(request(path, query).get().build()).use { resp ->
+            return json.decodeFromString(resp.body!!.string())
+        }
+    }
+
+    private fun execute(req: Request): Response {
+        // The API key sits in the `X-Api-Key` header of `req` — never let it into a log line.
+        val started = System.nanoTime()
+        val resp = try {
+            http.newCall(req).execute()
+        } catch (e: IOException) {
+            val ms = (System.nanoTime() - started) / 1_000_000
+            log.warn("Tolgee ${req.method} ${req.url.encodedPath} failed after ${ms}ms: ${e.message}")
+            throw e
+        }
+        val ms = (System.nanoTime() - started) / 1_000_000
+        if (!resp.isSuccessful) {
+            resp.use { r ->
+                val body = runCatching { r.body?.string().orEmpty() }.getOrDefault("")
+                log.warn("Tolgee ${req.method} ${req.url.encodedPath} -> ${r.code} in ${ms}ms: ${body.take(200)}")
+                throw TolgeeApiException(r.code, humanErrorMessage(r.code, body))
+            }
+        }
+        if (log.isDebugEnabled) {
+            log.debug("Tolgee ${req.method} ${req.url.encodedPath} -> ${resp.code} in ${ms}ms")
+        }
+        return resp
+    }
+
+    private fun request(path: String, query: Map<String, String> = emptyMap()): Request.Builder {
+        val urlBuilder = "${baseUrl.trimEnd('/')}$path".toHttpUrl().newBuilder()
+        for ((k, v) in query) urlBuilder.addQueryParameter(k, v)
+        return Request.Builder()
+            .url(urlBuilder.build())
+            .header("X-Api-Key", apiKey)
+            .header("Accept", "application/json")
+            .header("User-Agent", userAgent)
+            .header("X-Tolgee-Client", "intellij-plugin")
+            .header("X-Tolgee-Client-Version", pluginVersion)
+    }
+
     companion object {
         /**
-         * Normalises the user-entered Tolgee instance URL and rejects anything that
-         * would either crash later inside okhttp or exfiltrate the API key over an
-         * insecure channel.
-         *
-         *  - Trims and drops trailing slashes.
-         *  - If the scheme is missing (`app.tolgee.io`), assumes `https://`.
-         *  - Rejects any scheme other than `http` / `https`.
-         *  - Rejects `http://` unless the host is a loopback / on-machine host
-         *    (`localhost`, `127.x.x.x`, `[::1]`, or a `.local` name), so the API
-         *    key can't be sent in cleartext to arbitrary internet hosts even when
-         *    the URL is set by a committed `.idea/tolgee.xml`.
+         * Returns a normalised base URL. Also blocks the API key from being sent over
+         * cleartext http:// to a public host — the `.idea/tolgee.xml` that carries the
+         * URL is frequently committed to VCS, so a hostile URL there would otherwise
+         * leak the key on the next Pull.
          *
          * @throws IllegalArgumentException with a message suitable for surfacing in
          *   the UI when the URL is not usable.
@@ -273,22 +265,44 @@ class TolgeeApiClient(
                         "('${url.host}'). Use https:// for public Tolgee instances.",
                 )
             }
-            // Strip trailing '/' so callers can splice paths onto it directly.
             return withScheme.trimEnd('/')
         }
 
+        /**
+         * Turns a raw server response into a message safe to show in a Messages dialog.
+         * Proxies and WAFs happily return HTML for a Tolgee JSON API — don't paste an
+         * HTML login page verbatim into a modal. Falls back to a status-code-keyed hint
+         * plus a compact plain-text tail.
+         */
+        fun humanErrorMessage(code: Int, body: String): String {
+            val hint = when (code) {
+                401 -> "Invalid or expired Tolgee API key."
+                403 -> "The Tolgee API key lacks the required scope for this operation."
+                404 -> "The Tolgee endpoint or project was not found."
+                429 -> "Rate-limited by Tolgee. Wait a moment and retry."
+                in 500..599 -> "Tolgee server error ($code). See idea.log for details."
+                else -> "Tolgee API $code."
+            }
+            val trimmed = body.trim()
+            val looksLikeMarkup = trimmed.startsWith("<") || trimmed.startsWith("<!DOCTYPE", ignoreCase = true)
+            if (trimmed.isEmpty() || looksLikeMarkup) return hint
+            val compact = trimmed.replace(Regex("\\s+"), " ").take(200)
+            return "$hint\n$compact"
+        }
+
+        // Cryptographically bound to the local machine — the kernel routes these
+        // regardless of DNS, so plain http is safe. mDNS `.local` is deliberately
+        // excluded: any device on the same LAN can advertise a `.local` name, so
+        // a rogue mDNS responder could catch the API key over cleartext.
         private fun isLoopbackHost(host: String): Boolean {
             val h = host.lowercase()
             return h == "localhost" ||
                 h == "::1" ||
-                h.endsWith(".local") ||
                 h.matches(Regex("""^127(?:\.\d{1,3}){3}$"""))
         }
 
         val log = Logger.getInstance(TolgeeApiClient::class.java)
 
-        // Shared across TolgeeApiClient instances so we reuse connection/thread pools instead of
-        // spinning up a fresh OkHttpClient per dialog interaction.
         val sharedHttp: OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
