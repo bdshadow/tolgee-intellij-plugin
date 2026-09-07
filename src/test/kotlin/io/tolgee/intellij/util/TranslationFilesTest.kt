@@ -62,14 +62,6 @@ class TranslationFilesTest : BasePlatformTestCase() {
         createFile(emailsDir, "en.json", """{"welcome":"Hi"}""")
         createFile(emailsDir, "fr.json", """{"welcome":"Salut"}""")
 
-        // Files deeper than one level should be ignored.
-        val deep = WriteAction.computeAndWait<VirtualFile, RuntimeException> {
-            emailsDir.createChildDirectory(this, "nope")
-        }
-        createFile(deep, "en.json", "{}")
-        // Non-JSON siblings should be ignored too.
-        createFile(dir, "README.md", "not a translation file")
-
         val listed = TranslationFiles.listAllLanguageFiles(dir).map { it.namespace to it.language }.toSet()
         assertEquals(
             setOf(
@@ -80,6 +72,28 @@ class TranslationFilesTest : BasePlatformTestCase() {
             ),
             listed,
         )
+    }
+
+    fun testListAllLanguageFilesIgnoresFilesDeeperThanOneLevel() {
+        val dir = tempDir()
+        val emailsDir = WriteAction.computeAndWait<VirtualFile, RuntimeException> {
+            dir.createChildDirectory(this, "emails")
+        }
+        val deep = WriteAction.computeAndWait<VirtualFile, RuntimeException> {
+            emailsDir.createChildDirectory(this, "nope")
+        }
+        createFile(deep, "en.json", "{}")
+
+        assertEquals(emptyList<Pair<String?, String>>(),
+            TranslationFiles.listAllLanguageFiles(dir).map { it.namespace to it.language })
+    }
+
+    fun testListAllLanguageFilesIgnoresNonJsonSiblings() {
+        val dir = tempDir()
+        createFile(dir, "README.md", "not a translation file")
+
+        assertEquals(emptyList<Pair<String?, String>>(),
+            TranslationFiles.listAllLanguageFiles(dir).map { it.namespace to it.language })
     }
 
     fun testWriteFlatJsonOverwritesExistingFile() {
