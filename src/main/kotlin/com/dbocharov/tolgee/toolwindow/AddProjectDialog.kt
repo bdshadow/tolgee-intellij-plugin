@@ -1,0 +1,487 @@
+package com.dbocharov.tolgee.toolwindow
+
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.WriteAction
+import com.intellij.openapi.progress.ProgressIndicator
+import com.intellij.openapi.progress.Task
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.ComboBox
+import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.ui.ValidationInfo
+import com.intellij.ui.CheckBoxList
+import com.intellij.ui.components.JBCheckBox
+import com.intellij.ui.components.JBPasswordField
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextField
+import com.intellij.ui.dsl.builder.AlignX
+import com.intellij.ui.dsl.builder.CollapsibleRow
+import com.intellij.ui.dsl.builder.panel
+import com.intellij.util.ui.JBDimension
+import com.dbocharov.tolgee.api.TolgeeApiClient
+import com.dbocharov.tolgee.api.TolgeeProject
+import com.dbocharov.tolgee.project.TolgeeKeyCache
+import com.dbocharov.tolgee.project.TolgeeProjectLink
+import com.dbocharov.tolgee.pull.PullAction
+import com.dbocharov.tolgee.settings.TolgeeAppSettings
+import com.dbocharov.tolgee.util.TolgeeFilterMath
+import com.dbocharov.tolgee.util.TranslationFiles
+import java.awt.event.ItemEvent
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import javax.swing.DefaultComboBoxModel
+import javax.swing.JButton
+import javax.swing.JComponent
+
+class AddProjectDialog(private val ideProject: Project) : DialogWrapper(ideProject) {
+
+    private val settings = TolgeeAppSettings.getInstance()
+    private val link = TolgeeProjectLink.getInstance(ideProject)
+
+    private val urlField = JBTextField(settings.instanceUrl.ifBlank { "https://app.tolgee.io" })
+    private val apiKeyField = JBPasswordField()
+    private val projectCombo = ComboBox<TolgeeProject>().apply { renderer = TolgeeProjectListRenderer() }
+    private val refreshProjectsButton = JButton("Load projects")
+    private val pathField = JBTextField(link.translationsPath.ifBlank { ".tolgee" })
+    private val autoPullCheckbox = JBCheckBox("Pull translations after creating the connection", true)
+    private val isCreation = !link.isLinked
+
+    private val namespacesList = CheckBoxList<String>().apply {
+        isEnabled = false
+        setStringItems(linkedMapOf(ALL_NAMESPACES to true))
+    }
+    private val languagesList = CheckBoxList<String>().apply {
+        isEnabled = false
+        setStringItems(linkedMapOf(ALL_LANGUAGES to true))
+    }
+
+    private var suppressListListeners = false
+
+    // Drop metadata responses from superseded loads (user clicked between projects).
+    private var metaEpoch = 0
+
+    private var latestBaseLanguage: String? = null
+
+    private lateinit var advancedGroup: CollapsibleRow
+
+    init {
+        title = if (link.isLinked) "Edit Tolgee Project" else "Add Tolgee Project"
+        setOKButtonText(if (link.isLinked) "Save" else "Add")
+        refreshProjectsButton.addActionListener { refreshProjects() }
+        projectCombo.addItemListener { e ->
+            if (e.stateChange == ItemEvent.SELECTED) {
+                (e.item as? TolgeeProject)?.let { loadProjectMeta(it.id) }
+            }
+            // DialogWrapper only auto-tracks text/checkbox fields; poke the OK state on combo changes.
+            refreshOkState()
+        }
+        installExclusiveAllListener(namespacesList, ALL_NAMESPACES)
+        installExclusiveAllListener(languagesList, ALL_LANGUAGES)
+        // Prefill the stored key only in Edit mode. For a new connection start
+        // with an empty field — the app-scoped save from a prior project shouldn't
+        // read as "we already know your key here."
+        if (link.isLinked) loadApiKeyIntoFieldAsync()
+        init()
+        if (link.isLinked) {
+            // Show current selection as a stub so OK is enabled without reloading.
+            val stub = TolgeeProject(id = link.tolgeeProjectId, name = link.tolgeeProjectName)
+            val model = DefaultComboBoxModel<TolgeeProject>()
+            model.addElement(stub)
+            projectCombo.model = model
+            projectCombo.selectedIndex = 0
+            // Swing collapses the setModel+selectedIndex sequence into no ItemEvent when the
+            // selection is already index 0, so the combo listener never fires and metadata
+            // never loads. Kick it off explicitly for edit mode.
+            loadProjectMeta(link.tolgeeProjectId)
+        }
+        refreshOkState()
+    }
+
+    private fun refreshOkState() {
+        isOKActionEnabled = doValidate() == null
+    }
+
+    override fun createCenterPanel(): JComponent = panel {
+        row("Instance URL:") { cell(urlField).resizableColumn().align(AlignX.FILL) }
+        row("API key:") { cell(apiKeyField).resizableColumn().align(AlignX.FILL) }
+        row("Tolgee project:") {
+            cell(projectCombo).resizableColumn().align(AlignX.FILL)
+            cell(refreshProjectsButton)
+        }
+        if (isCreation) {
+            row { cell(autoPullCheckbox) }
+        }
+        advancedGroup = collapsibleGroup("Advanced") {
+            row("Translations path:") { cell(pathField).resizableColumn().align(AlignX.FILL) }
+            row("Namespaces:") {
+                cell(JBScrollPane(namespacesList).apply { preferredSize = JBDimension(320, 120) })
+                    .resizableColumn().align(AlignX.FILL)
+            }
+            row("Languages:") {
+                cell(JBScrollPane(languagesList).apply { preferredSize = JBDimension(320, 120) })
+                    .resizableColumn().align(AlignX.FILL)
+            }
+        }
+    }.also {
+        advancedGroup.expanded = link.isLinked
+    }
+
+    override fun doValidate(): ValidationInfo? {
+        if (urlField.text.isBlank()) return ValidationInfo("Instance URL is required", urlField)
+        if (apiKeyField.password.isEmpty()) return ValidationInfo("API key is required", apiKeyField)
+        if (projectCombo.selectedItem == null) return ValidationInfo("Load and select a Tolgee project", projectCombo)
+        val pathText = pathField.text.trim()
+        if (pathText.isEmpty()) return ValidationInfo("Translations path is required", pathField)
+        if (TranslationFiles.safeRelativePath(pathText) == null) {
+            return ValidationInfo(
+                "Translations path must be a relative path under the project — no absolute paths, no '..', no Windows-reserved names.",
+                pathField,
+            )
+        }
+        return null
+    }
+
+    override fun doOKAction() {
+        val selected = projectCombo.selectedItem as? TolgeeProject ?: return
+        val newNamespaces = collectNamespaces()
+        val newLanguages = collectSelection(languagesList, ALL_LANGUAGES)
+        val newPath = pathField.text.trim().ifEmpty { ".tolgee" }
+
+        // Snapshot pre-mutation filters so we can detect widening after `link.*` is reassigned.
+        val filterWidened = !isCreation && (
+            TolgeeFilterMath.filterWasWidened(link.languages, newLanguages) ||
+                TolgeeFilterMath.filterWasWidened(link.namespaces, newNamespaces)
+            )
+
+        if (!confirmOrphanCleanup(newPath, newLanguages, newNamespaces)) return
+
+        val newUrl = urlField.text.trim()
+        val newKey = String(apiKeyField.password)
+        val newBaseLanguage = latestBaseLanguage
+
+        // Save the entire link atomically inside a modal task: writing the API key
+        // to PasswordSafe is a slow op, and we must not leave the app-level URL
+        // updated while the link fields are stale (or vice versa) if PasswordSafe
+        // throws. On failure we surface a real error and keep the dialog open so
+        // the user can retry — do NOT call super.doOKAction and do NOT fire Pull.
+        val saveError: Throwable? = runSaveTask {
+            settings.apiKey = newKey
+            settings.instanceUrl = newUrl
+            link.tolgeeProjectId = selected.id
+            link.tolgeeProjectName = selected.name
+            link.namespaces = newNamespaces.toMutableList()
+            link.translationsPath = newPath
+            link.languages = newLanguages.toMutableList()
+            newBaseLanguage?.let { link.baseLanguage = it }
+            // Materialise the directory so the tree renders "empty" not "missing".
+            try {
+                TranslationFiles.ensureDir(ideProject, link.translationsPath)
+            } catch (_: Exception) {
+            }
+        }
+        if (saveError != null) {
+            Messages.showErrorDialog(
+                ideProject,
+                "Couldn't save the Tolgee connection:\n${saveError.message ?: saveError.javaClass.simpleName}",
+                "Tolgee",
+            )
+            return
+        }
+
+        super.doOKAction()
+        link.fireChanged()
+        val autoPull = (isCreation && autoPullCheckbox.isSelected) || filterWidened
+        if (autoPull) {
+            PullAction.runFor(ideProject)
+        } else {
+            TolgeeKeyCache.getInstance(ideProject).refreshAsync()
+        }
+    }
+
+    /**
+     * Runs [work] on a background thread inside a modal progress, so PasswordSafe
+     * writes and other slow ops don't block the EDT. Returns null on success or the
+     * captured throwable on failure.
+     */
+    private fun runSaveTask(work: () -> Unit): Throwable? {
+        var err: Throwable? = null
+        val task = object : Task.Modal(ideProject, "Saving Tolgee connection", false) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                try {
+                    work()
+                } catch (t: Throwable) {
+                    err = t
+                }
+            }
+        }
+        task.queue()
+        return err
+    }
+
+    /**
+     * If the user narrowed the filter in Edit and there are local files that fall outside
+     * it, prompt Delete / Keep / Cancel. Returns `false` iff the user picked Cancel — the
+     * caller should abort the save so the dialog stays open.
+     */
+    private fun confirmOrphanCleanup(
+        newPath: String,
+        newLanguages: List<String>,
+        newNamespaces: List<String>,
+    ): Boolean {
+        if (isCreation || newPath != link.translationsPath) return true
+        val orphaned = filesNoLongerCovered(newPath, newLanguages, newNamespaces)
+        if (orphaned.isEmpty()) return true
+        val listing = orphaned.joinToString("\n") { "  • ${TolgeeFilterMath.labelFor(it)}" }
+        val choice = Messages.showYesNoCancelDialog(
+            ideProject,
+            "These files are no longer covered by the language/namespace filter:\n\n$listing\n\n" +
+                "Delete them from disk?",
+            "Tolgee",
+            "Delete",
+            "Keep",
+            Messages.getCancelButton(),
+            Messages.getQuestionIcon(),
+        )
+        return when (choice) {
+            Messages.YES -> { deleteOrphaned(orphaned); true }
+            Messages.NO -> true
+            else -> false
+        }
+    }
+
+    private fun filesNoLongerCovered(
+        newPath: String,
+        newLanguages: List<String>,
+        newNamespaces: List<String>,
+    ): List<TranslationFiles.LanguageFile> {
+        val dir = TranslationFiles.resolveDir(ideProject, newPath) ?: return emptyList()
+        if (!dir.isDirectory) return emptyList()
+        return TolgeeFilterMath.filesNoLongerCovered(
+            TranslationFiles.listAllLanguageFiles(dir),
+            newLanguages,
+            newNamespaces,
+        )
+    }
+
+    private fun deleteOrphaned(files: List<TranslationFiles.LanguageFile>) {
+        WriteAction.runAndWait<RuntimeException> {
+            for (lf in files) {
+                try {
+                    lf.file.delete(this)
+                } catch (_: Exception) {
+                    // Best-effort — the notification would spam if we surfaced each failure.
+                }
+            }
+        }
+    }
+
+    private fun refreshProjects() {
+        val url = urlField.text.trim()
+        val apiKey = String(apiKeyField.password)
+        if (url.isBlank() || apiKey.isBlank()) {
+            Messages.showWarningDialog(ideProject, "Enter URL and API key first.", "Tolgee")
+            return
+        }
+        val task = object : Task.Modal(ideProject, "Loading Tolgee projects", true) {
+            private var result: List<TolgeeProject> = emptyList()
+            private var err: Throwable? = null
+
+            override fun run(indicator: ProgressIndicator) {
+                indicator.isIndeterminate = true
+                try {
+                    val client = TolgeeApiClient(url, apiKey)
+                    val boundProjectId = client.currentApiKeyProjectId()
+                    result = if (boundProjectId != null) {
+                        listOf(client.getProject(boundProjectId))
+                    } else {
+                        client.listProjects()
+                    }
+                } catch (e: Exception) {
+                    err = e
+                }
+            }
+
+            override fun onFinished() {
+                ApplicationManager.getApplication().invokeLater {
+                    if (err != null) {
+                        Messages.showErrorDialog(ideProject, err!!.message ?: "Unknown error", "Tolgee")
+                        return@invokeLater
+                    }
+                    val model = DefaultComboBoxModel<TolgeeProject>()
+                    result.forEach { model.addElement(it) }
+                    projectCombo.model = model
+                    if (result.size == 1) projectCombo.selectedIndex = 0
+                    refreshOkState()
+                }
+            }
+        }
+        task.queue()
+    }
+
+    private fun loadApiKeyIntoFieldAsync() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val key = settings.apiKey
+            if (key.isEmpty()) return@executeOnPooledThread
+            ApplicationManager.getApplication().invokeLater(
+                {
+                    // Only fill if the user hasn't started typing something else in the
+                    // meantime — respect their input if the load races with a keystroke.
+                    if (apiKeyField.password.isEmpty()) apiKeyField.text = key
+                },
+                ModalityState.any(),
+            )
+        }
+    }
+
+    private fun loadProjectMeta(projectId: Long) {
+        val url = urlField.text.trim()
+        val apiKey = String(apiKeyField.password)
+        if (url.isBlank() || apiKey.isBlank()) return
+
+        val myEpoch = ++metaEpoch
+        // Task.Backgroundable's onFinished runs on the EDT under NON_MODAL modality, so its UI
+        // callback is queued behind this dialog's modality and doesn't fire until the dialog closes.
+        // Use a raw pooled thread + invokeLater(..., ModalityState.any()) instead — the metaEpoch
+        // guard drops stale responses.
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val client = TolgeeApiClient(url, apiKey)
+            val langFuture = ApplicationManager.getApplication().executeOnPooledThread(
+                Callable {
+                    runCatching {
+                        client.listProjectLanguages(projectId).filter { it.tag.isNotBlank() }
+                    }
+                },
+            )
+            val namespacesResult = runCatching { client.listProjectNamespaces(projectId) }
+            val languagesResult = try {
+                langFuture.get()
+            } catch (e: ExecutionException) {
+                Result.failure(e.cause ?: e)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                Result.failure(e)
+            }
+
+            ApplicationManager.getApplication().invokeLater({
+                if (myEpoch != metaEpoch) return@invokeLater
+                val errors = listOfNotNull(namespacesResult.exceptionOrNull(), languagesResult.exceptionOrNull())
+                if (errors.isNotEmpty()) {
+                    Messages.showWarningDialog(
+                        ideProject,
+                        "Failed to load project metadata:\n" +
+                            errors.joinToString("\n") { it.message ?: it.javaClass.simpleName },
+                        "Tolgee",
+                    )
+                }
+                val languages = languagesResult.getOrDefault(emptyList())
+                latestBaseLanguage = languages.firstOrNull { it.base }?.tag
+                populateNamespaces(namespacesResult.getOrDefault(emptyList()), link.namespaces.toSet())
+                populateLanguages(languages.map { it.tag }, link.languages.toSet())
+            }, ModalityState.any())
+        }
+    }
+
+    private fun populateNamespaces(available: List<String>, previouslySelected: Set<String>) {
+        val labels = available.map { if (it.isEmpty()) DEFAULT_NAMESPACE else it }
+        if (renderCollapsedIfTrivial(namespacesList, labels)) return
+        val previousLabels = previouslySelected.mapTo(mutableSetOf()) {
+            if (it.isEmpty()) DEFAULT_NAMESPACE else it
+        }
+        populate(namespacesList, ALL_NAMESPACES, labels, previousLabels)
+    }
+
+    private fun populateLanguages(available: List<String>, previouslySelected: Set<String>) {
+        if (renderCollapsedIfTrivial(languagesList, available)) return
+        populate(languagesList, ALL_LANGUAGES, available, previouslySelected)
+    }
+
+    /**
+     * When the project offers 0 or 1 real choice, showing "<All …>" alongside a single specific
+     * row is redundant. Collapse to just that single row, disabled — the filter has no effect.
+     * Returns true if it handled the render; false if the caller should fall through to [populate].
+     */
+    private fun renderCollapsedIfTrivial(list: CheckBoxList<String>, labels: List<String>): Boolean {
+        if (labels.size > 1) return false
+        suppressListListeners = true
+        try {
+            val items = linkedMapOf<String, Boolean>()
+            labels.firstOrNull()?.let { items[it] = true }
+            list.setStringItems(items)
+            list.isEnabled = false
+        } finally {
+            suppressListListeners = false
+        }
+        return true
+    }
+
+    private fun collectNamespaces(): List<String> =
+        collectSelection(namespacesList, ALL_NAMESPACES).map {
+            if (it == DEFAULT_NAMESPACE) "" else it
+        }
+
+    private fun populate(
+        list: CheckBoxList<String>,
+        allMarker: String,
+        available: List<String>,
+        previouslySelected: Set<String>,
+    ) {
+        suppressListListeners = true
+        try {
+            val useAll = previouslySelected.isEmpty()
+            val items = linkedMapOf<String, Boolean>()
+            items[allMarker] = useAll
+            for (item in available.sorted()) {
+                items[item] = !useAll && item in previouslySelected
+            }
+            list.setStringItems(items)
+            list.isEnabled = true
+        } finally {
+            suppressListListeners = false
+        }
+    }
+
+    // Enforces two invariants:
+    //  - Checking "all" unchecks specific rows; checking a specific row unchecks "all".
+    //  - At least one row is always checked — unchecking the last one re-checks "all".
+    private fun installExclusiveAllListener(list: CheckBoxList<String>, allMarker: String) {
+        list.setCheckBoxListListener { index, value ->
+            if (suppressListListeners) return@setCheckBoxListListener
+            suppressListListeners = true
+            try {
+                val item = list.getItemAt(index)
+                if (value) {
+                    if (item == allMarker) {
+                        for (i in 0 until list.itemsCount) {
+                            val other = list.getItemAt(i) ?: continue
+                            if (other != allMarker) list.setItemSelected(other, false)
+                        }
+                    } else {
+                        list.setItemSelected(allMarker, false)
+                    }
+                } else if ((0 until list.itemsCount).none { list.isItemSelected(it) }) {
+                    list.setItemSelected(allMarker, true)
+                }
+            } finally {
+                suppressListListeners = false
+            }
+        }
+    }
+
+    private fun collectSelection(list: CheckBoxList<String>, allMarker: String): List<String> {
+        if (list.isItemSelected(allMarker)) return emptyList()
+        val out = mutableListOf<String>()
+        for (i in 0 until list.itemsCount) {
+            val item = list.getItemAt(i) ?: continue
+            if (item != allMarker && list.isItemSelected(i)) out += item
+        }
+        return out
+    }
+
+    private companion object {
+        const val ALL_NAMESPACES = "<All namespaces>"
+        const val ALL_LANGUAGES = "<All languages>"
+        const val DEFAULT_NAMESPACE = "<Default namespace>"
+    }
+}

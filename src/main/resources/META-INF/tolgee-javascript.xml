@@ -11,6 +11,6 @@
         -->
         <completion.contributor
                 language="JavaScript"
-                implementationClass="io.tolgee.intellij.completion.JsTolgeeKeyCompletionContributor"/>
+                implementationClass="com.dbocharov.tolgee.completion.JsTolgeeKeyCompletionContributor"/>
     </extensions>
 </idea-plugin>

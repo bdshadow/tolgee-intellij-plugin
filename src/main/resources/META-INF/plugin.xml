@@ -1,5 +1,5 @@
 <idea-plugin>
-    <id>io.tolgee.intellij</id>
+    <id>com.dbocharov.tolgee</id>
     <name>Tolgee</name>
     <vendor email="bdshadow@gmail.com" url="https://github.com/bdshadow/tolgee-intellij-plugin">Dmitrii Bocharov</vendor>
 
@@ -93,63 +93,63 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <applicationService
-                serviceImplementation="io.tolgee.intellij.settings.TolgeeAppSettings"/>
+                serviceImplementation="com.dbocharov.tolgee.settings.TolgeeAppSettings"/>
 
         <projectService
-                serviceImplementation="io.tolgee.intellij.project.TolgeeProjectLink"/>
+                serviceImplementation="com.dbocharov.tolgee.project.TolgeeProjectLink"/>
 
         <projectService
-                serviceImplementation="io.tolgee.intellij.project.TolgeeKeyCache"/>
+                serviceImplementation="com.dbocharov.tolgee.project.TolgeeKeyCache"/>
 
         <toolWindow
                 id="Tolgee"
                 anchor="right"
-                icon="io.tolgee.intellij.util.TolgeeIcons.TOOL_WINDOW"
-                factoryClass="io.tolgee.intellij.toolwindow.TolgeeToolWindowFactory"/>
+                icon="com.dbocharov.tolgee.util.TolgeeIcons.TOOL_WINDOW"
+                factoryClass="com.dbocharov.tolgee.toolwindow.TolgeeToolWindowFactory"/>
 
         <notificationGroup id="Tolgee" displayType="BALLOON"/>
 
         <completion.contributor
                 language="XML"
-                implementationClass="io.tolgee.intellij.completion.XmlTolgeeKeyCompletionContributor"/>
+                implementationClass="com.dbocharov.tolgee.completion.XmlTolgeeKeyCompletionContributor"/>
 
         <postStartupActivity
-                implementation="io.tolgee.intellij.project.TolgeeCacheStartupActivity"/>
+                implementation="com.dbocharov.tolgee.project.TolgeeCacheStartupActivity"/>
     </extensions>
 
     <actions>
         <action id="Tolgee.AddProject"
-                class="io.tolgee.intellij.toolwindow.AddProjectAction"
+                class="com.dbocharov.tolgee.toolwindow.AddProjectAction"
                 icon="AllIcons.General.Add"
                 text="Add Tolgee Project"
                 description="Configure a Tolgee instance and link a project">
         </action>
         <action id="Tolgee.Push"
-                class="io.tolgee.intellij.push.PushAction"
+                class="com.dbocharov.tolgee.push.PushAction"
                 icon="AllIcons.Actions.Upload"
                 text="Push to Tolgee"
                 description="Upload local translation files to Tolgee">
         </action>
         <action id="Tolgee.Pull"
-                class="io.tolgee.intellij.pull.PullAction"
+                class="com.dbocharov.tolgee.pull.PullAction"
                 icon="AllIcons.Actions.Download"
                 text="Pull from Tolgee"
                 description="Download translations from Tolgee">
         </action>
         <action id="Tolgee.RefreshKeys"
-                class="io.tolgee.intellij.completion.RefreshKeyCacheAction"
+                class="com.dbocharov.tolgee.completion.RefreshKeyCacheAction"
                 icon="AllIcons.Actions.Refresh"
                 text="Refresh Tolgee Keys"
                 description="Refresh the local cache of Tolgee keys">
         </action>
         <action id="Tolgee.Unlink"
-                class="io.tolgee.intellij.toolwindow.UnlinkProjectAction"
+                class="com.dbocharov.tolgee.toolwindow.UnlinkProjectAction"
                 icon="AllIcons.General.Remove"
                 text="Unlink Tolgee Project"
                 description="Remove the link to the Tolgee project">
         </action>
         <action id="Tolgee.EditProject"
-                class="io.tolgee.intellij.toolwindow.EditProjectAction"
+                class="com.dbocharov.tolgee.toolwindow.EditProjectAction"
                 text="Edit Connection…"
                 description="Edit the Tolgee project connection">
         </action>

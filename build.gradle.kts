@@ -8,7 +8,7 @@ plugins {
     id("org.jetbrains.intellij.platform") version "2.2.1"
 }
 
-group = "io.tolgee"
+group = "com.dbocharov.tolgee"
 version = "0.0.1"
 
 repositories {
@@ -76,7 +76,7 @@ if (androidStudioPath != null) {
 
 intellijPlatform {
     pluginConfiguration {
-        id = "io.tolgee.intellij"
+        id = "com.dbocharov.tolgee"
         name = "Tolgee"
         version = project.version.toString()
         // description and <change-notes> live in src/main/resources/META-INF/plugin.xml
