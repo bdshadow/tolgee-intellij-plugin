@@ -11,10 +11,8 @@ import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.vcs.VcsFileListenerContextHelper
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.vcsUtil.VcsUtil
 import com.dbocharov.tolgee.api.TolgeeApiClient
 import com.dbocharov.tolgee.api.TolgeeKey
 import com.dbocharov.tolgee.api.TolgeeLanguage
@@ -152,17 +150,6 @@ class PullAction : AnAction() {
                     }
 
                     val rootDir = TranslationFiles.ensureDir(project, destPath)
-
-                    // Best-effort VCS suppression for the files we're about to add.
-                    val toIgnore = buckets.keys.map { (ns, lang) ->
-                        val rel = if (ns.isEmpty()) "$lang.json" else "$ns/$lang.json"
-                        VcsUtil.getFilePath("${rootDir.path}/$rel", false)
-                    }
-                    try {
-                        project.getService(VcsFileListenerContextHelper::class.java).ignoreAdded(toIgnore)
-                    } catch (_: Throwable) {
-                        // Helper changed class↔interface across platform versions; safe to skip.
-                    }
 
                     val nsDirs = mutableMapOf<String, VirtualFile>("" to rootDir)
                     for ((coord, flat) in buckets) {

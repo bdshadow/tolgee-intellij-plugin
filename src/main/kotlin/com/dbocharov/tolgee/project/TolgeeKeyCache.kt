@@ -1,6 +1,6 @@
 package com.dbocharov.tolgee.project
 
-import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.progress.ProgressIndicator
@@ -112,11 +112,9 @@ class TolgeeKeyCache(private val project: Project) {
                 indicator.isIndeterminate = true
                 startedAt = System.nanoTime()
                 try {
-                    val dir = ReadAction.compute<VirtualFile?, RuntimeException> {
-                        TranslationFiles.resolveDir(project, translationsPath)
-                    }
+                    val dir = runReadAction { TranslationFiles.resolveDir(project, translationsPath) }
                     loaded = if (dir == null || !dir.isDirectory) emptyList()
-                    else ReadAction.compute<List<CachedKey>, RuntimeException> { buildKeys(dir, baseLanguage) }
+                    else runReadAction { buildKeys(dir, baseLanguage) }
                 } catch (e: Exception) {
                     err = e
                 }
