@@ -80,6 +80,19 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>0.0.2</h3>
+        <ul>
+            <li>Declare Kotlin K1/K2 compatibility so Kotlin completion loads
+                on IDEs running the Kotlin plugin in K2 mode (default in
+                2024.2+).</li>
+            <li>Drop the deprecated <code>VcsFileListenerContextHelper</code>
+                suppression from Pull — restores the standard
+                &quot;Add to VCS?&quot; prompt on pull-created files and
+                fixes an <code>IncompatibleClassChangeError</code> against
+                IDEA 2026.x.</li>
+            <li>Migrate <code>ReadAction.compute</code> to
+                <code>runReadAction { … }</code> in the key-cache builder.</li>
+        </ul>
         <h3>0.0.1</h3>
         <ul>
             <li>Initial release.</li>
